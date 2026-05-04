@@ -1,6 +1,142 @@
 import { useState, useMemo, useEffect } from "react";
-import { Search, Plus, Calendar, Users, ChevronDown, ChevronRight, X, Filter, RefreshCw, Loader2, Edit3, Trash2 } from "lucide-react";
+import { Search, Plus, Calendar, Users, ChevronDown, ChevronRight, X, Filter, RefreshCw, Loader2, Edit3, Trash2, AlertCircle, ChevronLeft } from "lucide-react";
 import { supabase } from "./supabaseClient";
+
+// ===== 작성자 아바타 색상 =====
+const AVATAR_COLORS = [
+  { bg: "#dbeafe", text: "#1e40af" }, // blue
+  { bg: "#ddd6fe", text: "#6d28d9" }, // violet
+  { bg: "#fce7f3", text: "#be185d" }, // pink
+  { bg: "#fef3c7", text: "#92400e" }, // amber
+  { bg: "#d1fae5", text: "#065f46" }, // emerald
+  { bg: "#cffafe", text: "#155e75" }, // cyan
+  { bg: "#fee2e2", text: "#991b1b" }, // red
+  { bg: "#e0e7ff", text: "#3730a3" }, // indigo
+];
+
+function getAvatarColor(name) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+// ===== 한국식 날짜 =====
+function getTodayKorean() {
+  const d = new Date();
+  return d.getFullYear() + "년 " + (d.getMonth() + 1) + "월 " + d.getDate() + "일";
+}
+
+// ===== 이번주 월요일 (오늘 기준) =====
+function getMondayOfThisWeek() {
+  const d = new Date();
+  const day = d.getDay(); // 0=일, 1=월, ...
+  const diff = day === 0 ? -6 : 1 - day; // 일요일이면 -6, 월요일이면 0
+  d.setDate(d.getDate() + diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+// ===== 어떤 날짜가 이번주에 속하는지 =====
+function isThisWeek(dateStr) {
+  if (!dateStr) return false;
+  const monday = getMondayOfThisWeek();
+  const sunday = new Date(monday);
+  sunday.setDate(sunday.getDate() + 6);
+  sunday.setHours(23, 59, 59, 999);
+  const target = new Date(dateStr);
+  return target >= monday && target <= sunday;
+}
+
+// ===== 달력 컴포넌트 =====
+function MiniCalendar() {
+  const today = new Date();
+  const [viewYear, setViewYear] = useState(today.getFullYear());
+  const [viewMonth, setViewMonth] = useState(today.getMonth());
+
+  const firstDay = new Date(viewYear, viewMonth, 1);
+  const lastDay = new Date(viewYear, viewMonth + 1, 0);
+  const startDay = firstDay.getDay(); // 0=일
+  const daysInMonth = lastDay.getDate();
+  const prevMonthLastDay = new Date(viewYear, viewMonth, 0).getDate();
+
+  // 6주 * 7일 = 42칸 채우기
+  const cells = [];
+  // 이전 달
+  for (let i = startDay - 1; i >= 0; i--) {
+    cells.push({ day: prevMonthLastDay - i, type: "prev" });
+  }
+  // 이번 달
+  for (let i = 1; i <= daysInMonth; i++) {
+    cells.push({ day: i, type: "current" });
+  }
+  // 다음 달
+  while (cells.length < 42) {
+    cells.push({ day: cells.length - daysInMonth - startDay + 1, type: "next" });
+  }
+
+  const isToday = (cell) => {
+    return cell.type === "current" &&
+      viewYear === today.getFullYear() &&
+      viewMonth === today.getMonth() &&
+      cell.day === today.getDate();
+  };
+
+  const goPrev = () => {
+    if (viewMonth === 0) { setViewYear(viewYear - 1); setViewMonth(11); }
+    else setViewMonth(viewMonth - 1);
+  };
+  const goNext = () => {
+    if (viewMonth === 11) { setViewYear(viewYear + 1); setViewMonth(0); }
+    else setViewMonth(viewMonth + 1);
+  };
+
+  const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
+
+  return (
+    <div className="bg-white rounded-lg border border-sky-100 p-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs font-semibold text-sky-900">{viewYear}년 {viewMonth + 1}월</div>
+        <div className="flex gap-1">
+          <button onClick={goPrev} className="w-5 h-5 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center">
+            <ChevronLeft size={10} className="text-slate-600" />
+          </button>
+          <button onClick={goNext} className="w-5 h-5 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center">
+            <ChevronRight size={10} className="text-slate-600" />
+          </button>
+        </div>
+      </div>
+      <div className="grid grid-cols-7 gap-px text-[9px]">
+        {weekdays.map((w, i) => (
+          <div key={w} className={"text-center font-semibold py-1 " + (i === 0 ? "text-red-500" : i === 6 ? "text-blue-500" : "text-slate-600")}>{w}</div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-px text-[10px]">
+        {cells.map((cell, idx) => {
+          const colIdx = idx % 7;
+          const isCurr = cell.type === "current";
+          const todayCell = isToday(cell);
+          let textColor = "text-slate-700";
+          if (!isCurr) textColor = "text-slate-300";
+          else if (colIdx === 0) textColor = "text-red-500";
+          else if (colIdx === 6) textColor = "text-blue-500";
+
+          if (todayCell) {
+            return (
+              <div key={idx} className="flex items-center justify-center py-0.5">
+                <div className="w-[18px] h-[18px] bg-sky-500 text-white rounded-full flex items-center justify-center font-bold ring-2 ring-amber-400 ring-offset-1 ring-offset-white">
+                  {cell.day}
+                </div>
+              </div>
+            );
+          }
+          return (
+            <div key={idx} className={"text-center py-1 " + textColor}>{cell.day}</div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const [entries, setEntries] = useState([]);
@@ -35,7 +171,10 @@ export default function App() {
         createdAt: e.created_at,
       }));
       setEntries(formatted);
-      if (formatted.length > 0 && expandedId === null) setExpandedId(formatted[0].id);
+      // 이번주 일지가 있으면 그걸 자동으로 펼침, 없으면 가장 최신
+      const thisWeekEntry = formatted.find((e) => isThisWeek(e.thisWeekDate));
+      if (thisWeekEntry) setExpandedId(thisWeekEntry.id);
+      else if (formatted.length > 0 && expandedId === null) setExpandedId(formatted[0].id);
     }
     setLoading(false);
   }
@@ -51,12 +190,8 @@ export default function App() {
       notes: entry.notes,
     }]);
 
-    if (error) {
-      alert("저장 실패: " + error.message);
-    } else {
-      await fetchEntries();
-      setShowNewModal(false);
-    }
+    if (error) alert("저장 실패: " + error.message);
+    else { await fetchEntries(); setShowNewModal(false); }
   }
 
   async function updateEntry(entry) {
@@ -73,24 +208,15 @@ export default function App() {
       })
       .eq("id", entry.id);
 
-    if (error) {
-      alert("수정 실패: " + error.message);
-    } else {
-      await fetchEntries();
-      setEditingEntry(null);
-    }
+    if (error) alert("수정 실패: " + error.message);
+    else { await fetchEntries(); setEditingEntry(null); }
   }
 
   async function deleteEntry(id) {
     if (!confirm("정말 이 일지를 삭제하시겠어요? 삭제하면 복구할 수 없습니다.")) return;
-
     const { error } = await supabase.from("journal_entries").delete().eq("id", id);
-
-    if (error) {
-      alert("삭제 실패: " + error.message);
-    } else {
-      await fetchEntries();
-    }
+    if (error) alert("삭제 실패: " + error.message);
+    else await fetchEntries();
   }
 
   const getWeekInfo = (dateStr) => {
@@ -126,32 +252,37 @@ export default function App() {
     return stats;
   }, [entries]);
 
+  // ===== 이번주 제출자: this_week_date가 이번주에 속하는 일지의 작성자 =====
   const thisWeekSubmitted = useMemo(() => {
-    const oneWeekAgo = new Date();
-    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-    return entries.filter((e) => new Date(e.createdAt) > oneWeekAgo).map((e) => e.author);
+    return entries.filter((e) => isThisWeek(e.thisWeekDate)).map((e) => e.author);
   }, [entries]);
 
+  const submittedRate = Object.keys(authorStats).length > 0
+    ? Math.round((thisWeekSubmitted.length / Object.keys(authorStats).length) * 100)
+    : 0;
+
   return (
-    <div className="min-h-screen bg-stone-50 text-stone-900" style={{ fontFamily: "'Noto Sans KR', system-ui, sans-serif" }}>
-      <header className="bg-white border-b border-stone-200 sticky top-0 z-10">
+    <div className="min-h-screen bg-slate-50 text-slate-900" style={{ fontFamily: "'Noto Sans KR', system-ui, sans-serif" }}>
+      {/* ===== 헤더 ===== */}
+      <header className="sticky top-0 z-10 relative overflow-hidden" style={{ background: "linear-gradient(135deg, #0c4a6e 0%, #075985 100%)" }}>
+        <div className="absolute bottom-0 left-0 right-0 h-0.5" style={{ background: "linear-gradient(90deg, transparent 0%, #fbbf24 30%, #fbbf24 70%, transparent 100%)" }}></div>
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-stone-900 rounded flex items-center justify-center">
+            <div className="w-9 h-9 bg-white/15 rounded-lg flex items-center justify-center backdrop-blur">
               <Calendar size={18} className="text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-bold tracking-tight">주간업무일지</h1>
-              <p className="text-xs text-stone-500">마린엔지오 · 탄성파 탐사팀 (DB 연결됨)</p>
+              <h1 className="text-white text-lg font-medium tracking-tight">주간업무일지</h1>
+              <p className="text-white/70 text-xs mt-0.5">마린엔지오 · {getTodayKorean()}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={fetchEntries} className="px-3 py-2 text-sm text-stone-600 hover:bg-stone-100 rounded flex items-center gap-1.5">
-              <RefreshCw size={15} />
+            <button onClick={fetchEntries} className="px-3 py-1.5 text-sm text-white bg-white/10 hover:bg-white/20 border border-white/20 rounded-md flex items-center gap-1.5 transition">
+              <RefreshCw size={14} />
               새로고침
             </button>
-            <button onClick={() => setShowNewModal(true)} className="px-4 py-2 bg-stone-900 text-white text-sm rounded hover:bg-stone-700 flex items-center gap-1.5 font-medium">
-              <Plus size={15} />
+            <button onClick={() => setShowNewModal(true)} className="px-4 py-1.5 text-sm font-semibold rounded-md flex items-center gap-1.5 transition shadow-md hover:shadow-lg" style={{ background: "#fbbf24", color: "#422006" }}>
+              <Plus size={15} strokeWidth={3} />
               새 일지
             </button>
           </div>
@@ -159,78 +290,89 @@ export default function App() {
       </header>
 
       <div className="max-w-7xl mx-auto px-6 py-6 grid grid-cols-12 gap-6">
-        <aside className="col-span-3 space-y-4">
-          <div className="bg-white border border-stone-200 rounded-lg p-4">
+        {/* ===== 사이드바 ===== */}
+        <aside className="col-span-3 space-y-3">
+          {/* 팀원 현황 */}
+          <div className="bg-white border border-sky-100 rounded-lg p-4">
             <div className="flex items-center gap-2 mb-3">
-              <Users size={16} className="text-stone-500" />
-              <h2 className="text-sm font-semibold">팀원별 작성 현황</h2>
+              <Users size={14} className="text-sky-900" />
+              <h2 className="text-sm font-semibold">팀원 현황</h2>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1">
               {Object.entries(authorStats).map(([name, count]) => {
                 const submitted = thisWeekSubmitted.includes(name);
                 return (
-                  <div key={name} className="flex items-center justify-between py-1.5">
+                  <div key={name} className="flex items-center justify-between py-1">
                     <div className="flex items-center gap-2">
-                      <div className={"w-2 h-2 rounded-full " + (submitted ? "bg-emerald-500" : "bg-stone-300")}></div>
-                      <span className="text-sm text-stone-700">{name}</span>
+                      <div className={"w-1.5 h-1.5 rounded-full " + (submitted ? "bg-emerald-500" : "bg-slate-300")}></div>
+                      <span className="text-xs text-slate-700">{name}</span>
                     </div>
-                    <span className="text-xs text-stone-500 font-mono">{count}건</span>
+                    <span className="text-[10px] text-slate-500 font-mono">{count}건</span>
                   </div>
                 );
               })}
               {Object.keys(authorStats).length === 0 && !loading && (
-                <div className="text-xs text-stone-400 text-center py-4">아직 일지가 없습니다</div>
+                <div className="text-xs text-slate-400 text-center py-3">아직 일지가 없습니다</div>
               )}
             </div>
-            <div className="mt-3 pt-3 border-t border-stone-100 flex items-center gap-2 text-xs text-stone-500">
-              <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+            <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2 text-[10px] text-slate-500">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
               <span>이번주 제출 완료</span>
             </div>
           </div>
 
-          <div className="bg-white border border-stone-200 rounded-lg p-4">
-            <h2 className="text-sm font-semibold mb-3">통계</h2>
-            <div className="space-y-3">
-              <div>
-                <div className="text-2xl font-bold tracking-tight">{entries.length}</div>
-                <div className="text-xs text-stone-500">총 일지 수</div>
-              </div>
-              <div>
-                <div className="text-2xl font-bold tracking-tight text-emerald-600">
-                  {thisWeekSubmitted.length}/{Math.max(Object.keys(authorStats).length, 1)}
-                </div>
-                <div className="text-xs text-stone-500">이번주 제출률</div>
-              </div>
+          {/* 이번주 현황 */}
+          <div className="rounded-lg border border-sky-200 p-4" style={{ background: "linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)" }}>
+            <div className="text-xs font-medium text-sky-900 mb-1.5">이번주 현황</div>
+            <div className="text-2xl font-bold text-sky-900 leading-none">
+              {thisWeekSubmitted.length}
+              <span className="text-base text-sky-700">/{Math.max(Object.keys(authorStats).length, 1)}</span>
             </div>
+            <div className="text-[10px] text-slate-600 mt-1">제출률 {submittedRate}%</div>
+            <div className="mt-2 h-1 bg-white/60 rounded-full overflow-hidden">
+              <div className="h-full bg-sky-500 rounded-full transition-all" style={{ width: submittedRate + "%" }}></div>
+            </div>
+          </div>
+
+          {/* 풀 달력 */}
+          <MiniCalendar />
+
+          {/* 회사 로고 */}
+          <div className="bg-white border border-sky-100 rounded-lg p-4 text-center">
+            <img src="/logo.jpg" alt="Marine & Geo" className="w-20 h-20 mx-auto object-contain" />
+            <div className="text-[10px] text-slate-500 mt-2 font-medium tracking-wider">MARINE &amp; GEO</div>
+            <div className="text-[9px] text-slate-400 mt-0.5">Surveying the Future</div>
           </div>
         </aside>
 
-        <main className="col-span-9 space-y-4">
-          <div className="bg-white border border-stone-200 rounded-lg p-3 flex items-center gap-3">
-            <div className="flex-1 flex items-center gap-2 px-3 py-1.5 bg-stone-50 rounded border border-stone-200">
-              <Search size={15} className="text-stone-400" />
+        {/* ===== 메인 영역 ===== */}
+        <main className="col-span-9 space-y-3">
+          {/* 검색 + 필터 */}
+          <div className="bg-white border border-sky-100 rounded-lg p-3 flex items-center gap-3">
+            <div className="flex-1 flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded border border-slate-200">
+              <Search size={14} className="text-slate-400" />
               <input type="text" placeholder="과거 일지 검색 (예: 신안 케이윈드파워)" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="flex-1 bg-transparent text-sm outline-none" />
               {searchQuery && (
-                <button onClick={() => setSearchQuery("")} className="text-stone-400 hover:text-stone-600">
+                <button onClick={() => setSearchQuery("")} className="text-slate-400 hover:text-slate-600">
                   <X size={14} />
                 </button>
               )}
             </div>
-            <div className="flex items-center gap-2 px-3 py-1.5 border border-stone-200 rounded">
-              <Filter size={14} className="text-stone-400" />
+            <div className="flex items-center gap-2 px-3 py-1.5 border border-sky-100 rounded">
+              <Filter size={13} className="text-slate-400" />
               <select value={authorFilter} onChange={(e) => setAuthorFilter(e.target.value)} className="bg-transparent text-sm outline-none cursor-pointer">
                 {authors.map((a) => <option key={a} value={a}>{a}</option>)}
               </select>
             </div>
           </div>
 
-          <div className="text-xs text-stone-500 px-1">
+          <div className="text-xs text-slate-500 px-1">
             {loading ? "불러오는 중..." : filteredEntries.length + "개의 일지"}
             {searchQuery && <span> · "{searchQuery}" 검색 결과</span>}
           </div>
 
           {loading && (
-            <div className="bg-white border border-stone-200 rounded-lg p-12 text-center text-stone-500 text-sm flex items-center justify-center gap-2">
+            <div className="bg-white border border-sky-100 rounded-lg p-12 text-center text-slate-500 text-sm flex items-center justify-center gap-2">
               <Loader2 size={16} className="animate-spin" />
               데이터를 불러오는 중...
             </div>
@@ -239,57 +381,73 @@ export default function App() {
           <div className="space-y-3">
             {filteredEntries.map((entry) => {
               const isExpanded = expandedId === entry.id;
+              const isCurrent = isThisWeek(entry.thisWeekDate);
+              const avatar = getAvatarColor(entry.author);
+
+              const cardClass = isCurrent
+                ? "bg-white rounded-lg border-2 border-sky-500 shadow-[0_0_0_3px_rgba(14,165,233,0.1)] overflow-hidden relative group"
+                : "bg-white rounded-lg border border-slate-200 hover:border-sky-300 overflow-hidden relative group transition";
+
               return (
-                <div key={entry.id} className="bg-white border border-stone-200 rounded-lg overflow-hidden hover:border-stone-300 transition">
-                  <button onClick={() => setExpandedId(isExpanded ? null : entry.id)} className="w-full px-5 py-4 flex items-center gap-4 hover:bg-stone-50 transition text-left">
-                    {isExpanded ? <ChevronDown size={16} className="text-stone-400" /> : <ChevronRight size={16} className="text-stone-400" />}
+                <div key={entry.id} className={cardClass}>
+                  {/* 좌측 강조 띠 (이번주 = 항상 표시, 일반 = 호버 시) */}
+                  <div className={
+                    "absolute left-0 top-0 bottom-0 w-1 bg-sky-500 transition-opacity " +
+                    (isCurrent ? "opacity-100" : "opacity-0 group-hover:opacity-60")
+                  }></div>
+
+                  <button onClick={() => setExpandedId(isExpanded ? null : entry.id)} className="w-full px-5 py-3.5 flex items-center gap-3 hover:bg-slate-50 transition text-left">
+                    {isExpanded ? <ChevronDown size={15} className="text-slate-400 flex-shrink-0" /> : <ChevronRight size={15} className="text-slate-400 flex-shrink-0" />}
                     <div className="flex-1 grid grid-cols-12 gap-3 items-center">
-                      <div className="col-span-1 text-xs font-mono text-stone-400">#{entry.id}</div>
+                      <div className="col-span-1 flex items-center gap-1.5">
+                        {isCurrent && (
+                          <span className="bg-sky-500 text-white px-1.5 py-0.5 rounded text-[9px] font-medium">이번주</span>
+                        )}
+                        <span className="text-[10px] font-mono text-slate-400">#{entry.id}</span>
+                      </div>
                       <div className="col-span-3"><div className="text-sm font-medium">{entry.weekLabel}</div></div>
-                      <div className="col-span-3 text-xs text-stone-500 font-mono">{entry.thisWeekDate} → {entry.nextWeekDate}</div>
-                      <div className="col-span-3 text-xs text-stone-600 truncate">{entry.thisWeekTasks.split("\n")[0]}</div>
+                      <div className="col-span-3 text-[11px] text-slate-500 font-mono">{entry.thisWeekDate} → {entry.nextWeekDate}</div>
+                      <div className="col-span-3 text-xs text-slate-600 truncate">{entry.thisWeekTasks.split("\n")[0]}</div>
                       <div className="col-span-2 flex items-center justify-end gap-2">
-                        <div className="w-6 h-6 rounded-full bg-stone-200 flex items-center justify-center text-[10px] font-bold text-stone-600">{entry.author.charAt(0)}</div>
-                        <span className="text-xs text-stone-600">{entry.author}</span>
+                        <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold" style={{ backgroundColor: avatar.bg, color: avatar.text }}>
+                          {entry.author.charAt(0)}
+                        </div>
+                        <span className="text-xs text-slate-600 truncate">{entry.author}</span>
                       </div>
                     </div>
                   </button>
 
                   {isExpanded && (
-                    <div className="px-5 pb-5 pt-2 border-t border-stone-100">
+                    <div className="px-5 pb-4 pt-2 border-t border-slate-100">
                       <div className="grid grid-cols-2 gap-6 mb-4">
                         <div>
-                          <div className="text-xs font-semibold text-stone-500 uppercase tracking-wider mb-2">이번주 할 일 · {entry.thisWeekDate}</div>
-                          <pre className="text-sm text-stone-800 whitespace-pre-wrap font-sans leading-relaxed">{entry.thisWeekTasks}</pre>
+                          <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">이번주 할 일 · {entry.thisWeekDate}</div>
+                          <pre className="text-sm text-slate-800 whitespace-pre-wrap font-sans leading-relaxed text-left">{entry.thisWeekTasks}</pre>
                         </div>
-                        <div className="space-y-4">
+                        <div className="space-y-3">
                           <div>
-                            <div className="text-xs font-semibold text-stone-500 uppercase tracking-wider mb-2">다음주 할 일 · {entry.nextWeekDate}</div>
-                            <pre className="text-sm text-stone-800 whitespace-pre-wrap font-sans leading-relaxed">{entry.nextWeekTasks || <span className="text-stone-400 italic">작성되지 않음</span>}</pre>
+                            <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">다음주 할 일 · {entry.nextWeekDate}</div>
+                            <pre className="text-sm text-slate-800 whitespace-pre-wrap font-sans leading-relaxed text-left">{entry.nextWeekTasks || <span className="text-slate-400 italic">작성되지 않음</span>}</pre>
                           </div>
                           {entry.notes && (
-                            <div>
-                              <div className="text-xs font-semibold text-stone-500 uppercase tracking-wider mb-2">확인 사항</div>
-                              <div className="text-sm text-stone-800 bg-amber-50 border-l-2 border-amber-400 px-3 py-2 rounded-r">{entry.notes}</div>
+                            <div className="bg-amber-50 border-l-2 border-amber-400 rounded-r px-3 py-2 flex gap-2 items-start">
+                              <AlertCircle size={12} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                              <div>
+                                <div className="text-[10px] font-semibold text-amber-800 mb-0.5">확인 사항</div>
+                                <div className="text-xs text-amber-900">{entry.notes}</div>
+                              </div>
                             </div>
                           )}
                         </div>
                       </div>
 
-                      {/* === 수정/삭제 버튼 === */}
-                      <div className="flex items-center gap-2 pt-3 border-t border-stone-100">
-                        <button
-                          onClick={() => setEditingEntry(entry)}
-                          className="px-3 py-1.5 text-xs text-stone-600 hover:bg-stone-100 rounded flex items-center gap-1.5 border border-stone-200"
-                        >
-                          <Edit3 size={12} />
+                      <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                        <button onClick={() => setEditingEntry(entry)} className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded flex items-center gap-1.5 border border-slate-200">
+                          <Edit3 size={11} />
                           수정
                         </button>
-                        <button
-                          onClick={() => deleteEntry(entry.id)}
-                          className="px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 rounded flex items-center gap-1.5 border border-stone-200"
-                        >
-                          <Trash2 size={12} />
+                        <button onClick={() => deleteEntry(entry.id)} className="px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 rounded flex items-center gap-1.5 border border-red-200">
+                          <Trash2 size={11} />
                           삭제
                         </button>
                       </div>
@@ -301,7 +459,7 @@ export default function App() {
           </div>
 
           {!loading && filteredEntries.length === 0 && (
-            <div className="bg-white border border-stone-200 rounded-lg p-12 text-center text-stone-500 text-sm">
+            <div className="bg-white border border-sky-100 rounded-lg p-12 text-center text-slate-500 text-sm">
               {entries.length === 0 ? "아직 작성된 일지가 없습니다." : "검색 결과가 없습니다."}
             </div>
           )}
@@ -309,24 +467,11 @@ export default function App() {
       </div>
 
       {showNewModal && (
-        <EntryModal
-          mode="new"
-          onClose={() => setShowNewModal(false)}
-          onSave={saveEntry}
-          getWeekInfo={getWeekInfo}
-          getNextMonday={getNextMonday}
-        />
+        <EntryModal mode="new" onClose={() => setShowNewModal(false)} onSave={saveEntry} getWeekInfo={getWeekInfo} getNextMonday={getNextMonday} />
       )}
 
       {editingEntry && (
-        <EntryModal
-          mode="edit"
-          existing={editingEntry}
-          onClose={() => setEditingEntry(null)}
-          onSave={updateEntry}
-          getWeekInfo={getWeekInfo}
-          getNextMonday={getNextMonday}
-        />
+        <EntryModal mode="edit" existing={editingEntry} onClose={() => setEditingEntry(null)} onSave={updateEntry} getWeekInfo={getWeekInfo} getNextMonday={getNextMonday} />
       )}
     </div>
   );
@@ -354,56 +499,52 @@ function EntryModal({ mode, existing, onClose, onSave, getWeekInfo, getNextMonda
       id: existing?.id,
       author,
       weekLabel: weekInfo + "(" + author + ")",
-      thisWeekDate,
-      nextWeekDate,
-      thisWeekTasks,
-      nextWeekTasks,
-      notes,
+      thisWeekDate, nextWeekDate, thisWeekTasks, nextWeekTasks, notes,
     });
     setSaving(false);
   }
 
   return (
-    <div className="fixed inset-0 bg-stone-900/50 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-auto">
-        <div className="px-6 py-4 border-b border-stone-200 flex items-center justify-between sticky top-0 bg-white">
+        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white">
           <h2 className="text-lg font-bold">{mode === "edit" ? "일지 수정" : "새 주간업무일지"}</h2>
-          <button onClick={onClose} className="text-stone-400 hover:text-stone-600">
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
             <X size={20} />
           </button>
         </div>
         <div className="p-6 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="text-xs font-semibold text-stone-600 mb-1 block">이번주 시작일 (월)</label>
-              <input type="date" value={thisWeekDate} onChange={(e) => setThisWeekDate(e.target.value)} className="w-full px-3 py-2 border border-stone-200 rounded text-sm" />
-              <div className="text-xs text-stone-500 mt-1">자동: {weekInfo}</div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">이번주 시작일 (월)</label>
+              <input type="date" value={thisWeekDate} onChange={(e) => setThisWeekDate(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded text-sm" />
+              <div className="text-xs text-slate-500 mt-1">자동: {weekInfo}</div>
             </div>
             <div>
-              <label className="text-xs font-semibold text-stone-600 mb-1 block">다음주 (자동)</label>
-              <input type="date" value={nextWeekDate} disabled className="w-full px-3 py-2 border border-stone-200 rounded text-sm bg-stone-50" />
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">다음주 (자동)</label>
+              <input type="date" value={nextWeekDate} disabled className="w-full px-3 py-2 border border-slate-200 rounded text-sm bg-slate-50" />
             </div>
           </div>
           <div>
-            <label className="text-xs font-semibold text-stone-600 mb-1 block">작성자 *</label>
-            <input type="text" value={author} onChange={(e) => setAuthor(e.target.value)} placeholder="이름" className="w-full px-3 py-2 border border-stone-200 rounded text-sm" />
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">작성자 *</label>
+            <input type="text" value={author} onChange={(e) => setAuthor(e.target.value)} placeholder="이름" className="w-full px-3 py-2 border border-slate-200 rounded text-sm" />
           </div>
           <div>
-            <label className="text-xs font-semibold text-stone-600 mb-1 block">이번주 할 일 *</label>
-            <textarea value={thisWeekTasks} onChange={(e) => setThisWeekTasks(e.target.value)} placeholder="1. 탄성파 탐사" rows={8} className="w-full px-3 py-2 border border-stone-200 rounded text-sm font-mono" />
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">이번주 할 일 *</label>
+            <textarea value={thisWeekTasks} onChange={(e) => setThisWeekTasks(e.target.value)} placeholder="1. 탄성파 탐사" rows={8} className="w-full px-3 py-2 border border-slate-200 rounded text-sm font-mono" />
           </div>
           <div>
-            <label className="text-xs font-semibold text-stone-600 mb-1 block">다음주 할 일</label>
-            <textarea value={nextWeekTasks} onChange={(e) => setNextWeekTasks(e.target.value)} rows={4} className="w-full px-3 py-2 border border-stone-200 rounded text-sm font-mono" />
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">다음주 할 일</label>
+            <textarea value={nextWeekTasks} onChange={(e) => setNextWeekTasks(e.target.value)} rows={4} className="w-full px-3 py-2 border border-slate-200 rounded text-sm font-mono" />
           </div>
           <div>
-            <label className="text-xs font-semibold text-stone-600 mb-1 block">확인 사항</label>
-            <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="민방위 훈련, 회의 일정 등" className="w-full px-3 py-2 border border-stone-200 rounded text-sm" />
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">확인 사항</label>
+            <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="민방위 훈련, 회의 일정 등" className="w-full px-3 py-2 border border-slate-200 rounded text-sm" />
           </div>
         </div>
-        <div className="px-6 py-4 border-t border-stone-200 flex justify-end gap-2 sticky bottom-0 bg-white">
-          <button onClick={onClose} disabled={saving} className="px-4 py-2 text-sm text-stone-600 hover:bg-stone-100 rounded disabled:opacity-50">취소</button>
-          <button onClick={handleSave} disabled={saving} className="px-4 py-2 bg-stone-900 text-white text-sm rounded hover:bg-stone-700 font-medium disabled:opacity-50 flex items-center gap-2">
+        <div className="px-6 py-4 border-t border-slate-200 flex justify-end gap-2 sticky bottom-0 bg-white">
+          <button onClick={onClose} disabled={saving} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded disabled:opacity-50">취소</button>
+          <button onClick={handleSave} disabled={saving} className="px-4 py-2 bg-sky-900 text-white text-sm rounded hover:bg-sky-800 font-medium disabled:opacity-50 flex items-center gap-2">
             {saving && <Loader2 size={14} className="animate-spin" />}
             {saving ? "저장 중..." : (mode === "edit" ? "수정 저장" : "저장")}
           </button>
