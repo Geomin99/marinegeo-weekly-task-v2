@@ -2,16 +2,15 @@ import { useState, useMemo, useEffect } from "react";
 import { Search, Plus, Calendar, Users, ChevronDown, ChevronRight, X, Filter, RefreshCw, Loader2, Edit3, Trash2, AlertCircle, ChevronLeft } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
-// ===== 작성자 아바타 색상 =====
 const AVATAR_COLORS = [
-  { bg: "#dbeafe", text: "#1e40af" }, // blue
-  { bg: "#ddd6fe", text: "#6d28d9" }, // violet
-  { bg: "#fce7f3", text: "#be185d" }, // pink
-  { bg: "#fef3c7", text: "#92400e" }, // amber
-  { bg: "#d1fae5", text: "#065f46" }, // emerald
-  { bg: "#cffafe", text: "#155e75" }, // cyan
-  { bg: "#fee2e2", text: "#991b1b" }, // red
-  { bg: "#e0e7ff", text: "#3730a3" }, // indigo
+  { bg: "#dbeafe", text: "#1e40af" },
+  { bg: "#ddd6fe", text: "#6d28d9" },
+  { bg: "#fce7f3", text: "#be185d" },
+  { bg: "#fef3c7", text: "#92400e" },
+  { bg: "#d1fae5", text: "#065f46" },
+  { bg: "#cffafe", text: "#155e75" },
+  { bg: "#fee2e2", text: "#991b1b" },
+  { bg: "#e0e7ff", text: "#3730a3" },
 ];
 
 function getAvatarColor(name) {
@@ -20,23 +19,20 @@ function getAvatarColor(name) {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
-// ===== 한국식 날짜 =====
 function getTodayKorean() {
   const d = new Date();
   return d.getFullYear() + "년 " + (d.getMonth() + 1) + "월 " + d.getDate() + "일";
 }
 
-// ===== 이번주 월요일 (오늘 기준) =====
 function getMondayOfThisWeek() {
   const d = new Date();
-  const day = d.getDay(); // 0=일, 1=월, ...
-  const diff = day === 0 ? -6 : 1 - day; // 일요일이면 -6, 월요일이면 0
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
   d.setDate(d.getDate() + diff);
   d.setHours(0, 0, 0, 0);
   return d;
 }
 
-// ===== 어떤 날짜가 이번주에 속하는지 =====
 function isThisWeek(dateStr) {
   if (!dateStr) return false;
   const monday = getMondayOfThisWeek();
@@ -47,7 +43,6 @@ function isThisWeek(dateStr) {
   return target >= monday && target <= sunday;
 }
 
-// ===== 달력 컴포넌트 =====
 function MiniCalendar() {
   const today = new Date();
   const [viewYear, setViewYear] = useState(today.getFullYear());
@@ -55,40 +50,19 @@ function MiniCalendar() {
 
   const firstDay = new Date(viewYear, viewMonth, 1);
   const lastDay = new Date(viewYear, viewMonth + 1, 0);
-  const startDay = firstDay.getDay(); // 0=일
+  const startDay = firstDay.getDay();
   const daysInMonth = lastDay.getDate();
   const prevMonthLastDay = new Date(viewYear, viewMonth, 0).getDate();
 
-  // 6주 * 7일 = 42칸 채우기
   const cells = [];
-  // 이전 달
-  for (let i = startDay - 1; i >= 0; i--) {
-    cells.push({ day: prevMonthLastDay - i, type: "prev" });
-  }
-  // 이번 달
-  for (let i = 1; i <= daysInMonth; i++) {
-    cells.push({ day: i, type: "current" });
-  }
-  // 다음 달
-  while (cells.length < 42) {
-    cells.push({ day: cells.length - daysInMonth - startDay + 1, type: "next" });
-  }
+  for (let i = startDay - 1; i >= 0; i--) cells.push({ day: prevMonthLastDay - i, type: "prev" });
+  for (let i = 1; i <= daysInMonth; i++) cells.push({ day: i, type: "current" });
+  while (cells.length < 42) cells.push({ day: cells.length - daysInMonth - startDay + 1, type: "next" });
 
-  const isToday = (cell) => {
-    return cell.type === "current" &&
-      viewYear === today.getFullYear() &&
-      viewMonth === today.getMonth() &&
-      cell.day === today.getDate();
-  };
+  const isToday = (cell) => cell.type === "current" && viewYear === today.getFullYear() && viewMonth === today.getMonth() && cell.day === today.getDate();
 
-  const goPrev = () => {
-    if (viewMonth === 0) { setViewYear(viewYear - 1); setViewMonth(11); }
-    else setViewMonth(viewMonth - 1);
-  };
-  const goNext = () => {
-    if (viewMonth === 11) { setViewYear(viewYear + 1); setViewMonth(0); }
-    else setViewMonth(viewMonth + 1);
-  };
+  const goPrev = () => { if (viewMonth === 0) { setViewYear(viewYear - 1); setViewMonth(11); } else setViewMonth(viewMonth - 1); };
+  const goNext = () => { if (viewMonth === 11) { setViewYear(viewYear + 1); setViewMonth(0); } else setViewMonth(viewMonth + 1); };
 
   const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
 
@@ -129,9 +103,7 @@ function MiniCalendar() {
               </div>
             );
           }
-          return (
-            <div key={idx} className={"text-center py-1 " + textColor}>{cell.day}</div>
-          );
+          return <div key={idx} className={"text-center py-1 " + textColor}>{cell.day}</div>;
         })}
       </div>
     </div>
@@ -154,13 +126,14 @@ export default function App() {
     const { data, error } = await supabase
       .from("journal_entries")
       .select("*")
-      .order("this_week_date", { ascending: false });
+      .order("created_at", { ascending: true });
 
     if (error) {
       alert("데이터 불러오기 실패: " + error.message);
     } else {
-      const formatted = data.map((e) => ({
+      const formatted = data.map((e, idx) => ({
         id: e.id,
+        displayNumber: idx + 1,
         author: e.author,
         weekLabel: e.week_label,
         thisWeekDate: e.this_week_date,
@@ -170,44 +143,33 @@ export default function App() {
         notes: e.notes || "",
         createdAt: e.created_at,
       }));
-      setEntries(formatted);
-      // 이번주 일지가 있으면 그걸 자동으로 펼침, 없으면 가장 최신
-      const thisWeekEntry = formatted.find((e) => isThisWeek(e.thisWeekDate));
+      const reversed = [...formatted].reverse();
+      setEntries(reversed);
+      const thisWeekEntry = reversed.find((e) => isThisWeek(e.thisWeekDate));
       if (thisWeekEntry) setExpandedId(thisWeekEntry.id);
-      else if (formatted.length > 0 && expandedId === null) setExpandedId(formatted[0].id);
+      else if (reversed.length > 0 && expandedId === null) setExpandedId(reversed[0].id);
     }
     setLoading(false);
   }
 
   async function saveEntry(entry) {
     const { error } = await supabase.from("journal_entries").insert([{
-      author: entry.author,
-      week_label: entry.weekLabel,
-      this_week_date: entry.thisWeekDate,
-      next_week_date: entry.nextWeekDate,
-      this_week_tasks: entry.thisWeekTasks,
-      next_week_tasks: entry.nextWeekTasks,
+      author: entry.author, week_label: entry.weekLabel,
+      this_week_date: entry.thisWeekDate, next_week_date: entry.nextWeekDate,
+      this_week_tasks: entry.thisWeekTasks, next_week_tasks: entry.nextWeekTasks,
       notes: entry.notes,
     }]);
-
     if (error) alert("저장 실패: " + error.message);
     else { await fetchEntries(); setShowNewModal(false); }
   }
 
   async function updateEntry(entry) {
-    const { error } = await supabase
-      .from("journal_entries")
-      .update({
-        author: entry.author,
-        week_label: entry.weekLabel,
-        this_week_date: entry.thisWeekDate,
-        next_week_date: entry.nextWeekDate,
-        this_week_tasks: entry.thisWeekTasks,
-        next_week_tasks: entry.nextWeekTasks,
-        notes: entry.notes,
-      })
-      .eq("id", entry.id);
-
+    const { error } = await supabase.from("journal_entries").update({
+      author: entry.author, week_label: entry.weekLabel,
+      this_week_date: entry.thisWeekDate, next_week_date: entry.nextWeekDate,
+      this_week_tasks: entry.thisWeekTasks, next_week_tasks: entry.nextWeekTasks,
+      notes: entry.notes,
+    }).eq("id", entry.id);
     if (error) alert("수정 실패: " + error.message);
     else { await fetchEntries(); setEditingEntry(null); }
   }
@@ -252,7 +214,6 @@ export default function App() {
     return stats;
   }, [entries]);
 
-  // ===== 이번주 제출자: this_week_date가 이번주에 속하는 일지의 작성자 =====
   const thisWeekSubmitted = useMemo(() => {
     return entries.filter((e) => isThisWeek(e.thisWeekDate)).map((e) => e.author);
   }, [entries]);
@@ -263,10 +224,9 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900" style={{ fontFamily: "'Noto Sans KR', system-ui, sans-serif" }}>
-      {/* ===== 헤더 ===== */}
       <header className="sticky top-0 z-10 relative overflow-hidden" style={{ background: "linear-gradient(135deg, #0c4a6e 0%, #075985 100%)" }}>
         <div className="absolute bottom-0 left-0 right-0 h-0.5" style={{ background: "linear-gradient(90deg, transparent 0%, #fbbf24 30%, #fbbf24 70%, transparent 100%)" }}></div>
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 bg-white/15 rounded-lg flex items-center justify-center backdrop-blur">
               <Calendar size={18} className="text-white" />
@@ -289,10 +249,8 @@ export default function App() {
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-6 py-6 grid grid-cols-12 gap-6">
-        {/* ===== 사이드바 ===== */}
-        <aside className="col-span-3 space-y-3">
-          {/* 팀원 현황 */}
+      <div className="px-6 py-6 grid grid-cols-12 gap-6">
+        <aside className="col-span-2 space-y-3">
           <div className="bg-white border border-sky-100 rounded-lg p-4">
             <div className="flex items-center gap-2 mb-3">
               <Users size={14} className="text-sky-900" />
@@ -321,7 +279,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* 이번주 현황 */}
           <div className="rounded-lg border border-sky-200 p-4" style={{ background: "linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)" }}>
             <div className="text-xs font-medium text-sky-900 mb-1.5">이번주 현황</div>
             <div className="text-2xl font-bold text-sky-900 leading-none">
@@ -334,10 +291,8 @@ export default function App() {
             </div>
           </div>
 
-          {/* 풀 달력 */}
           <MiniCalendar />
 
-          {/* 회사 로고 */}
           <div className="bg-white border border-sky-100 rounded-lg p-4 text-center">
             <img src="/logo.jpg" alt="Marine & Geo" className="w-20 h-20 mx-auto object-contain" />
             <div className="text-[10px] text-slate-500 mt-2 font-medium tracking-wider">MARINE &amp; GEO</div>
@@ -345,9 +300,7 @@ export default function App() {
           </div>
         </aside>
 
-        {/* ===== 메인 영역 ===== */}
-        <main className="col-span-9 space-y-3">
-          {/* 검색 + 필터 */}
+        <main className="col-span-10 space-y-3">
           <div className="bg-white border border-sky-100 rounded-lg p-3 flex items-center gap-3">
             <div className="flex-1 flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded border border-slate-200">
               <Search size={14} className="text-slate-400" />
@@ -390,7 +343,6 @@ export default function App() {
 
               return (
                 <div key={entry.id} className={cardClass}>
-                  {/* 좌측 강조 띠 (이번주 = 항상 표시, 일반 = 호버 시) */}
                   <div className={
                     "absolute left-0 top-0 bottom-0 w-1 bg-sky-500 transition-opacity " +
                     (isCurrent ? "opacity-100" : "opacity-0 group-hover:opacity-60")
@@ -398,45 +350,41 @@ export default function App() {
 
                   <button onClick={() => setExpandedId(isExpanded ? null : entry.id)} className="w-full px-5 py-3.5 flex items-center gap-3 hover:bg-slate-50 transition text-left">
                     {isExpanded ? <ChevronDown size={15} className="text-slate-400 flex-shrink-0" /> : <ChevronRight size={15} className="text-slate-400 flex-shrink-0" />}
-                    <div className="flex-1 grid grid-cols-12 gap-3 items-center">
-                      <div className="col-span-1 flex items-center gap-1.5">
-                        {isCurrent && (
-                          <span className="bg-sky-500 text-white px-1.5 py-0.5 rounded text-[9px] font-medium">이번주</span>
-                        )}
-                        <span className="text-[10px] font-mono text-slate-400">#{entry.id}</span>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {isCurrent && (
+                        <span className="bg-sky-500 text-white px-1.5 py-0.5 rounded text-[9px] font-medium">이번주</span>
+                      )}
+                      <span className="text-[11px] font-mono text-slate-400">#{entry.displayNumber}</span>
+                    </div>
+                    <div className="flex-1 text-sm font-medium">{entry.weekLabel}</div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold" style={{ backgroundColor: avatar.bg, color: avatar.text }}>
+                        {entry.author.charAt(0)}
                       </div>
-                      <div className="col-span-3"><div className="text-sm font-medium">{entry.weekLabel}</div></div>
-                      <div className="col-span-3 text-[11px] text-slate-500 font-mono">{entry.thisWeekDate} → {entry.nextWeekDate}</div>
-                      <div className="col-span-3 text-xs text-slate-600 truncate">{entry.thisWeekTasks.split("\n")[0]}</div>
-                      <div className="col-span-2 flex items-center justify-end gap-2">
-                        <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold" style={{ backgroundColor: avatar.bg, color: avatar.text }}>
-                          {entry.author.charAt(0)}
-                        </div>
-                        <span className="text-xs text-slate-600 truncate">{entry.author}</span>
-                      </div>
+                      <span className="text-xs text-slate-600">{entry.author}</span>
                     </div>
                   </button>
 
                   {isExpanded && (
                     <div className="px-5 pb-4 pt-2 border-t border-slate-100">
-                      <div className="grid grid-cols-2 gap-6 mb-4">
+                      <div className="grid grid-cols-3 gap-6 mb-4">
                         <div>
-                          <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">이번주 할 일 · {entry.thisWeekDate}</div>
+                          <div className="text-sm font-semibold text-sky-900 mb-2">이번주 할 일 · {entry.thisWeekDate}</div>
                           <pre className="text-sm text-slate-800 whitespace-pre-wrap font-sans leading-relaxed text-left">{entry.thisWeekTasks}</pre>
                         </div>
-                        <div className="space-y-3">
-                          <div>
-                            <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">다음주 할 일 · {entry.nextWeekDate}</div>
-                            <pre className="text-sm text-slate-800 whitespace-pre-wrap font-sans leading-relaxed text-left">{entry.nextWeekTasks || <span className="text-slate-400 italic">작성되지 않음</span>}</pre>
-                          </div>
-                          {entry.notes && (
+                        <div>
+                          <div className="text-sm font-semibold text-sky-900 mb-2">다음주 할 일 · {entry.nextWeekDate}</div>
+                          <pre className="text-sm text-slate-800 whitespace-pre-wrap font-sans leading-relaxed text-left">{entry.nextWeekTasks || <span className="text-slate-400 italic">작성되지 않음</span>}</pre>
+                        </div>
+                        <div>
+                          <div className="text-sm font-semibold text-sky-900 mb-2">확인 사항</div>
+                          {entry.notes ? (
                             <div className="bg-amber-50 border-l-2 border-amber-400 rounded-r px-3 py-2 flex gap-2 items-start">
-                              <AlertCircle size={12} className="text-amber-600 mt-0.5 flex-shrink-0" />
-                              <div>
-                                <div className="text-[10px] font-semibold text-amber-800 mb-0.5">확인 사항</div>
-                                <div className="text-xs text-amber-900">{entry.notes}</div>
-                              </div>
+                              <AlertCircle size={14} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                              <div className="text-sm text-amber-900 leading-relaxed">{entry.notes}</div>
                             </div>
+                          ) : (
+                            <div className="text-sm text-slate-400 italic">없음</div>
                           )}
                         </div>
                       </div>
