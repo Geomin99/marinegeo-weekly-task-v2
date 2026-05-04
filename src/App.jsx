@@ -367,26 +367,43 @@ export default function App() {
 
                   {isExpanded && (
                     <div className="px-5 pb-4 pt-2 border-t border-slate-100">
-                      <div className="grid grid-cols-3 gap-6 mb-4">
-                        <div>
-                          <div className="text-sm font-semibold text-sky-900 mb-2">이번주 할 일 · {entry.thisWeekDate}</div>
-                          <pre className="text-sm text-slate-800 whitespace-pre-wrap font-sans leading-relaxed text-left">{entry.thisWeekTasks}</pre>
+                      <div className="grid grid-cols-3 gap-3 mb-4">
+
+                        {/* 이번주 할 일 (파랑톤) */}
+                        <div className="rounded-md overflow-hidden border border-sky-200">
+                          <div className="bg-sky-900 text-white px-3.5 py-2 text-sm font-semibold">
+                            이번주 할 일 · {entry.thisWeekDate}
+                          </div>
+                          <div className="bg-sky-50 px-3.5 py-3">
+                            <pre className="text-sm text-slate-800 whitespace-pre-wrap font-sans leading-relaxed text-left">{entry.thisWeekTasks}</pre>
+                          </div>
                         </div>
-                        <div>
-                          <div className="text-sm font-semibold text-sky-900 mb-2">다음주 할 일 · {entry.nextWeekDate}</div>
-                          <pre className="text-sm text-slate-800 whitespace-pre-wrap font-sans leading-relaxed text-left">{entry.nextWeekTasks || <span className="text-slate-400 italic">작성되지 않음</span>}</pre>
+
+                        {/* 다음주 할 일 (회색톤) */}
+                        <div className="rounded-md overflow-hidden border border-slate-200">
+                          <div className="bg-slate-600 text-white px-3.5 py-2 text-sm font-semibold">
+                            다음주 할 일 · {entry.nextWeekDate}
+                          </div>
+                          <div className="bg-slate-50 px-3.5 py-3">
+                            <pre className="text-sm text-slate-800 whitespace-pre-wrap font-sans leading-relaxed text-left">{entry.nextWeekTasks || <span className="text-slate-400 italic">작성되지 않음</span>}</pre>
+                          </div>
                         </div>
-                        <div>
-                          <div className="text-sm font-semibold text-sky-900 mb-2">확인 사항</div>
-                          {entry.notes ? (
-                            <div className="bg-amber-50 border-l-2 border-amber-400 rounded-r px-3 py-2 flex gap-2 items-start">
-                              <AlertCircle size={14} className="text-amber-600 mt-0.5 flex-shrink-0" />
-                              <div className="text-sm text-amber-900 leading-relaxed">{entry.notes}</div>
-                            </div>
-                          ) : (
-                            <div className="text-sm text-slate-400 italic">없음</div>
-                          )}
+
+                        {/* 확인 사항 (노랑톤) */}
+                        <div className="rounded-md overflow-hidden border border-amber-200">
+                          <div className="bg-amber-500 text-white px-3.5 py-2 text-sm font-semibold flex items-center gap-1.5">
+                            <AlertCircle size={14} />
+                            확인 사항
+                          </div>
+                          <div className="bg-amber-50 px-3.5 py-3">
+                            {entry.notes ? (
+                              <div className="text-sm text-amber-900 leading-relaxed whitespace-pre-wrap text-left">{entry.notes}</div>
+                            ) : (
+                              <div className="text-sm text-slate-400 italic">없음</div>
+                            )}
+                          </div>
                         </div>
+
                       </div>
 
                       <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
