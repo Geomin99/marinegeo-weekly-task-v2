@@ -500,11 +500,11 @@ function EntryModal({ mode, existing, onClose, onSave, getWeekInfo, getNextMonda
           </div>
           <div>
             <label className="text-xs font-semibold text-slate-600 mb-1 block">다음주 할 일</label>
-            <textarea value={nextWeekTasks} onChange={(e) => setNextWeekTasks(e.target.value)} rows={4} className="w-full px-3 py-2 border border-slate-200 rounded text-sm font-mono" />
+            <textarea value={nextWeekTasks} onChange={(e) => setNextWeekTasks(e.target.value)} rows={8} className="w-full px-3 py-2 border border-slate-200 rounded text-sm font-mono" />
           </div>
           <div>
             <label className="text-xs font-semibold text-slate-600 mb-1 block">확인 사항</label>
-            <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="민방위 훈련, 회의 일정 등" className="w-full px-3 py-2 border border-slate-200 rounded text-sm" />
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="민방위 훈련, 회의 일정 등 (여러 줄 입력 가능)" rows={8} className="w-full px-3 py-2 border border-slate-200 rounded text-sm font-mono" />
           </div>
         </div>
         <div className="px-6 py-4 border-t border-slate-200 flex justify-end gap-2 sticky bottom-0 bg-white">
