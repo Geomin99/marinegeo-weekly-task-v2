@@ -152,18 +152,19 @@ function EntryCard({ entry, isExpanded, isCurrent, isNew, onToggle, onUpdate, on
   const avatar = getAvatarColor(localData.author || entry.author);
 
   // entry 가 외부에서 바뀌면 localData 동기화 (단, 편집 중이 아닐 때만)
+  // entry.id가 바뀔 때만 localData 동기화 (다른 일지로 전환 시)
+  // 같은 일지가 저장되어 내용이 외부에서 바뀌어도 사용자의 입력은 그대로 유지
   useEffect(() => {
-    if (editStatus === "idle" || editStatus === "saved") {
-      setLocalData({
-        author: entry.author || "",
-        thisWeekDate: entry.thisWeekDate || getMondayDateStr(),
-        nextWeekDate: entry.nextWeekDate || getNextMonday(getMondayDateStr()),
-        thisWeekTasks: entry.thisWeekTasks || "",
-        nextWeekTasks: entry.nextWeekTasks || "",
-        notes: entry.notes || "",
-      });
-    }
-  }, [entry.id, entry.author, entry.thisWeekDate, entry.nextWeekDate, entry.thisWeekTasks, entry.nextWeekTasks, entry.notes]);
+    setLocalData({
+      author: entry.author || "",
+      thisWeekDate: entry.thisWeekDate || getMondayDateStr(),
+      nextWeekDate: entry.nextWeekDate || getNextMonday(getMondayDateStr()),
+      thisWeekTasks: entry.thisWeekTasks || "",
+      nextWeekTasks: entry.nextWeekTasks || "",
+      notes: entry.notes || "",
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entry.id]);
 
   // 자동 저장 (디바운싱 1.5초)
   const scheduleAutoSave = useCallback((newData) => {
@@ -428,10 +429,11 @@ export default function App() {
   const [expandedId, setExpandedId] = useState(null);
   const [newEntry, setNewEntry] = useState(null); // 새 일지 임시 객체
 
-  useEffect(() => { fetchEntries(); }, []);
+  useEffect(() => { fetchEntries(true); }, []);
 
-  async function fetchEntries() {
-    setLoading(true);
+  // isInitial: 초기 로딩일 때만 expandedId를 자동으로 설정
+  async function fetchEntries(isInitial = false) {
+    if (isInitial) setLoading(true);
     const { data, error } = await supabase
       .from("journal_entries")
       .select("*")
@@ -454,13 +456,14 @@ export default function App() {
       }));
       const reversed = [...formatted].reverse();
       setEntries(reversed);
-      if (newEntry === null) {
+      // 초기 로딩일 때만 expandedId 자동 설정 (사용자가 펼친 상태 유지)
+      if (isInitial && newEntry === null) {
         const thisWeekEntry = reversed.find((e) => isThisWeek(e.thisWeekDate));
         if (thisWeekEntry) setExpandedId(thisWeekEntry.id);
-        else if (reversed.length > 0 && expandedId === null) setExpandedId(reversed[0].id);
+        else if (reversed.length > 0) setExpandedId(reversed[0].id);
       }
     }
-    setLoading(false);
+    if (isInitial) setLoading(false);
   }
 
   // 통합 저장 함수 (새 일지 또는 기존 일지 업데이트)
@@ -484,12 +487,27 @@ export default function App() {
       // 새 일지 모드 종료
       setNewEntry(null);
       if (inserted && inserted[0]) {
-        setExpandedId(inserted[0].id);
+        // 새로 생성된 일지를 entries 맨 위에 추가 (전체 새로고침 X)
+        const newId = inserted[0].id;
+        const newEntryFormatted = {
+          id: newId,
+          displayNumber: entries.length + 1,
+          author: data.author,
+          weekLabel: data.weekLabel,
+          thisWeekDate: data.thisWeekDate,
+          nextWeekDate: data.nextWeekDate,
+          thisWeekTasks: data.thisWeekTasks,
+          nextWeekTasks: data.nextWeekTasks,
+          notes: data.notes,
+          createdAt: inserted[0].created_at,
+        };
+        // 다른 일지들의 displayNumber도 +1씩 올림
+        setEntries(prev => [newEntryFormatted, ...prev]);
+        setExpandedId(newId);
       }
-      await fetchEntries();
       return { success: true };
     } else {
-      // 기존 일지: update
+      // 기존 일지: update (전체 새로고침 X, 해당 항목만 부분 업데이트)
       const { error } = await supabase.from("journal_entries").update({
         author: data.author,
         week_label: data.weekLabel,
@@ -504,7 +522,15 @@ export default function App() {
         alert("저장 실패: " + error.message);
         return { success: false };
       }
-      await fetchEntries();
+      // 해당 entry만 메모리에서 업데이트 (UI는 그대로)
+      setEntries(prev => prev.map(e =>
+        e.id === id
+          ? { ...e, author: data.author, weekLabel: data.weekLabel,
+              thisWeekDate: data.thisWeekDate, nextWeekDate: data.nextWeekDate,
+              thisWeekTasks: data.thisWeekTasks, nextWeekTasks: data.nextWeekTasks,
+              notes: data.notes }
+          : e
+      ));
       return { success: true };
     }
   }
