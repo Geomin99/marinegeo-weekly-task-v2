@@ -66,6 +66,51 @@ function getNextMonday(dateStr) {
   return d.toISOString().split("T")[0];
 }
 
+// ===== 자동 높이 조절 textarea (엑셀 스타일) =====
+function AutoResizeTextarea({ value, onChange, placeholder, className, minRows = 30 }) {
+  const textareaRef = useRef(null);
+
+  // 높이 자동 조절 함수
+  const adjustHeight = () => {
+    const el = textareaRef.current;
+    if (!el) return;
+    // 일단 높이를 auto로 만들어 scrollHeight 측정 가능하게
+    el.style.height = "auto";
+    // 한 줄 높이 계산 (line-height 기반)
+    const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 22;
+    // 패딩 고려한 최소 높이
+    const paddingTop = parseFloat(getComputedStyle(el).paddingTop) || 0;
+    const paddingBottom = parseFloat(getComputedStyle(el).paddingBottom) || 0;
+    const minHeight = lineHeight * minRows + paddingTop + paddingBottom;
+    // 실제 컨텐츠 높이와 최소 높이 중 큰 값으로 설정
+    const newHeight = Math.max(minHeight, el.scrollHeight);
+    el.style.height = newHeight + "px";
+  };
+
+  // value 바뀔 때마다 높이 재계산
+  useEffect(() => {
+    adjustHeight();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  // 컴포넌트 마운트 후 첫 높이 조절
+  useEffect(() => {
+    adjustHeight();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <textarea
+      ref={textareaRef}
+      value={value}
+      onChange={onChange}
+      placeholder={placeholder}
+      className={className}
+      style={{ overflow: "hidden" }}
+    />
+  );
+}
+
 // ===== 달력 =====
 function MiniCalendar() {
   const today = new Date();
@@ -349,11 +394,11 @@ function EntryCard({ entry, isExpanded, isCurrent, isNew, onToggle, onUpdate, on
                 이번주 할 일 · {localData.thisWeekDate}
               </div>
               <div className="bg-sky-50 p-1">
-                <textarea
+                <AutoResizeTextarea
                   value={localData.thisWeekTasks}
                   onChange={(e) => handleChange("thisWeekTasks", e.target.value)}
                   placeholder="예) 1. 탄성파 탐사&#10;  1) 명랑 해상풍력단지&#10;    - 최종 보고서 제출"
-                  rows={10}
+                  minRows={30}
                   className="w-full px-3 py-2 text-sm text-slate-800 bg-white rounded font-sans leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-sky-300 border-0"
                 />
               </div>
@@ -365,11 +410,11 @@ function EntryCard({ entry, isExpanded, isCurrent, isNew, onToggle, onUpdate, on
                 다음주 할 일 · {localData.nextWeekDate}
               </div>
               <div className="bg-slate-50 p-1">
-                <textarea
+                <AutoResizeTextarea
                   value={localData.nextWeekTasks}
                   onChange={(e) => handleChange("nextWeekTasks", e.target.value)}
                   placeholder="다음주 계획을 입력하세요..."
-                  rows={10}
+                  minRows={30}
                   className="w-full px-3 py-2 text-sm text-slate-800 bg-white rounded font-sans leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-slate-300 border-0"
                 />
               </div>
@@ -382,11 +427,11 @@ function EntryCard({ entry, isExpanded, isCurrent, isNew, onToggle, onUpdate, on
                 확인 사항
               </div>
               <div className="bg-amber-50 p-1">
-                <textarea
+                <AutoResizeTextarea
                   value={localData.notes}
                   onChange={(e) => handleChange("notes", e.target.value)}
                   placeholder="민방위 훈련, 회의 일정, 특이사항 등..."
-                  rows={10}
+                  minRows={30}
                   className="w-full px-3 py-2 text-sm text-amber-900 bg-white rounded font-sans leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-amber-300 border-0"
                 />
               </div>
