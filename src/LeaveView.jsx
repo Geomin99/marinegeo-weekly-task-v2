@@ -54,6 +54,14 @@ const STATUS_OPTIONS = [
 
 const DEFAULT_AUTHORS = ["김찬수", "최승표", "여은민"];
 
+// 시간 지정 모드를 default로 쓰는 일정 종류 (회의·외근·기타)
+const GENERAL_EVENT_TYPES = new Set(["회의", "외근", "기타"]);
+
+function hhmm(t) {
+  if (!t) return "";
+  return String(t).slice(0, 5);  // "09:30:00" → "09:30"
+}
+
 // ─────────────────────────────────────────────────────────────
 // 헬퍼
 // ─────────────────────────────────────────────────────────────
@@ -531,11 +539,8 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents }) {
       try {
         if (req.status === "rejected" || req.status === "cancelled") continue;
         if (onlyNew && req.google_calendar_event_id) continue;  // 신규만 push
-        const start = req.start_date;
-        const endRaw = req.end_date || req.start_date;
-        const endDt = new Date(endRaw);
-        endDt.setDate(endDt.getDate() + 1);
-        const endStr = ymd(endDt);
+        const startDate = req.start_date;
+        const endDate = req.end_date || req.start_date;
         const summary = `[${req.author}] ${req.leave_type_name || "휴가"}${req.destination ? ` - ${req.destination}` : ""}`;
         const description = [
           `상태: ${statusKo(req.status)}`,
@@ -543,7 +548,22 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents }) {
           req.companions && `동행: ${req.companions}`,
           req.trip_purpose && `목적: ${req.trip_purpose}`,
         ].filter(Boolean).join("\n");
-        const event = { summary, description, start: { date: start }, end: { date: endStr } };
+        let event;
+        if (req.is_all_day === false && req.start_time && req.end_time) {
+          // 시간 지정 이벤트 (회의·외근·기타 등)
+          const startISO = `${startDate}T${req.start_time.slice(0, 8)}+09:00`;
+          const endISO = `${endDate}T${req.end_time.slice(0, 8)}+09:00`;
+          event = { summary, description,
+                    start: { dateTime: startISO, timeZone: "Asia/Seoul" },
+                    end:   { dateTime: endISO,   timeZone: "Asia/Seoul" } };
+        } else {
+          // 종일 이벤트 (휴가·출장 등) — Google all-day는 end exclusive
+          const endDt = new Date(endDate);
+          endDt.setDate(endDt.getDate() + 1);
+          event = { summary, description,
+                    start: { date: startDate },
+                    end:   { date: ymd(endDt) } };
+        }
         const calUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
         if (req.google_calendar_event_id) {
           const r = await fetch(`${calUrl}/${req.google_calendar_event_id}`, {
@@ -783,9 +803,10 @@ function CalendarGrid({ cells, events, onCellClick, onEventClick, today }) {
                 const widthPct = ((p.endCol - p.startCol + 1) / 7) * 100;
                 const leftPct = (p.startCol / 7) * 100;
                 const topPx = HEADER_HEIGHT + p.slotIdx * (BAR_HEIGHT + BAR_GAP);
+                const siteTime = !isExternal && ev.is_all_day === false && ev.start_time ? hhmm(ev.start_time) : null;
                 const label = isExternal
                   ? `${ev.start_time ? `🕐 ${ev.start_time} ` : "📅 "}${ev.summary}`
-                  : `${isTrip ? "✈ " : ""}${ev.author} · ${ev.leave_type_name}${ev.destination ? " · " + ev.destination : ""}`;
+                  : `${isTrip ? "✈ " : ""}${siteTime ? `🕐 ${siteTime} ` : ""}${ev.author} · ${ev.leave_type_name}${ev.destination ? " · " + ev.destination : ""}`;
                 // 색상 전략: 진한 배경 + 흰 글자 (모든 막대 통일). pending은 dashed border로 구분.
                 const bg = isExternal ? "#64748b" : c.bg;
                 const fg = "#ffffff";
@@ -889,6 +910,9 @@ function LeaveRequestModal({ init, leaveTypes, authors, onClose, onSaved }) {
   const [leaveTypeId, setLeaveTypeId] = useState(existing?.leave_type_id || (leaveTypes[0]?.id || ""));
   const [startDate, setStartDate] = useState(existing?.start_date || init?.date || ymd(new Date()));
   const [endDate, setEndDate] = useState(existing?.end_date || existing?.start_date || init?.date || ymd(new Date()));
+  const [isAllDay, setIsAllDay] = useState(existing?.is_all_day !== false);  // default 종일
+  const [startTime, setStartTime] = useState(hhmm(existing?.start_time) || "09:30");
+  const [endTime, setEndTime] = useState(hhmm(existing?.end_time) || "10:30");
   const [destination, setDestination] = useState(existing?.destination || "");
   const [companions, setCompanions] = useState(existing?.companions || "");
   const [tripPurpose, setTripPurpose] = useState(existing?.trip_purpose || "");
@@ -902,6 +926,14 @@ function LeaveRequestModal({ init, leaveTypes, authors, onClose, onSaved }) {
     [leaveTypes, leaveTypeId]
   );
   const isTrip = selectedType?.name === "출장";
+  const isGeneralEvent = selectedType && GENERAL_EVENT_TYPES.has(selectedType.name);
+
+  // 새 신청에서 종류 바뀌면 종일/시간 모드 자동 분기
+  useEffect(() => {
+    if (existing) return;
+    if (!selectedType) return;
+    setIsAllDay(!GENERAL_EVENT_TYPES.has(selectedType.name));
+  }, [selectedType, existing]);
 
   const days = useMemo(() => daysBetween(startDate, endDate), [startDate, endDate]);
   const annualConsumed = useMemo(
@@ -924,6 +956,9 @@ function LeaveRequestModal({ init, leaveTypes, authors, onClose, onSaved }) {
       leave_type_name: selectedType.name,
       start_date: startDate,
       end_date: endDate === startDate ? null : endDate,
+      is_all_day: isAllDay,
+      start_time: isAllDay ? null : `${startTime}:00`,
+      end_time: isAllDay ? null : `${endTime}:00`,
       total_absence_days: absenceDays,
       annual_consumed: annualConsumed,
       status,
@@ -994,17 +1029,46 @@ function LeaveRequestModal({ init, leaveTypes, authors, onClose, onSaved }) {
               ))}
             </select>
           </div>
+          {/* 종일 토글 */}
           <div className="grid grid-cols-3 gap-3">
-            <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>시작일</label>
-            <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); if (endDate < e.target.value) setEndDate(e.target.value); }}
-                   className="col-span-2 px-3 py-2 border rounded-md outline-none"
-                   style={{ borderColor: THEME.line }} />
+            <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>일정 유형</label>
+            <div className="col-span-2 flex items-center gap-3">
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input type="radio" checked={isAllDay} onChange={() => setIsAllDay(true)} />
+                <span className="text-sm">종일</span>
+              </label>
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input type="radio" checked={!isAllDay} onChange={() => setIsAllDay(false)} />
+                <span className="text-sm">시간 지정</span>
+              </label>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>시작{isAllDay ? "일" : ""}</label>
+            <div className="col-span-2 flex gap-2">
+              <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); if (endDate < e.target.value) setEndDate(e.target.value); }}
+                     className="flex-1 px-3 py-2 border rounded-md outline-none"
+                     style={{ borderColor: THEME.line }} />
+              {!isAllDay && (
+                <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)}
+                       className="w-28 px-3 py-2 border rounded-md outline-none"
+                       style={{ borderColor: THEME.line }} />
+              )}
+            </div>
           </div>
           <div className="grid grid-cols-3 gap-3">
-            <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>종료일</label>
-            <input type="date" value={endDate} min={startDate} onChange={(e) => setEndDate(e.target.value)}
-                   className="col-span-2 px-3 py-2 border rounded-md outline-none"
-                   style={{ borderColor: THEME.line }} />
+            <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>종료{isAllDay ? "일" : ""}</label>
+            <div className="col-span-2 flex gap-2">
+              <input type="date" value={endDate} min={startDate} onChange={(e) => setEndDate(e.target.value)}
+                     className="flex-1 px-3 py-2 border rounded-md outline-none"
+                     style={{ borderColor: THEME.line }} />
+              {!isAllDay && (
+                <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)}
+                       className="w-28 px-3 py-2 border rounded-md outline-none"
+                       style={{ borderColor: THEME.line }} />
+              )}
+            </div>
           </div>
 
           {/* 출장 전용 필드 */}
