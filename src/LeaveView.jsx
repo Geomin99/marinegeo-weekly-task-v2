@@ -600,8 +600,9 @@ function CalendarGrid({ cells, events, onCellClick, onEventClick, today }) {
   const todayStr = ymd(today);
   const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
   const MAX_SLOTS = 4;
-  const BAR_HEIGHT = 22;
-  const HEADER_HEIGHT = 28;
+  const BAR_HEIGHT = 28;        // 22 → 28: 더 두껍게
+  const BAR_GAP = 3;
+  const HEADER_HEIGHT = 36;     // 28 → 36: 일자와 막대 사이 여유
 
   // weeks로 분리
   const weeks = [];
@@ -626,9 +627,10 @@ function CalendarGrid({ cells, events, onCellClick, onEventClick, today }) {
           }
         });
 
+        const rowMinHeight = Math.max(150, HEADER_HEIGHT + MAX_SLOTS * (BAR_HEIGHT + BAR_GAP) + 24);
         return (
           <div key={wi} className="relative grid grid-cols-7 border-b"
-               style={{ borderColor: THEME.line, minHeight: 130 }}>
+               style={{ borderColor: THEME.line, minHeight: rowMinHeight }}>
             {/* 날짜 셀 (배경 + 일자 표시) */}
             {week.map((cell, ci) => {
               const dateStr = ymd(cell.date);
@@ -643,10 +645,10 @@ function CalendarGrid({ cells, events, onCellClick, onEventClick, today }) {
                        borderColor: THEME.line2,
                        background: cell.other ? "#fafbfc" : isToday ? THEME.accentSoft : "#fff",
                        opacity: cell.other ? 0.45 : 1,
-                       padding: "6px 6px 0 6px",
+                       padding: "8px 8px 0 8px",
                      }}>
                   <div className="flex items-center justify-between">
-                    <span className={"text-sm " + (isToday ? "font-bold" : "")}
+                    <span className={"text-[15px] " + (isToday ? "font-bold" : "font-semibold")}
                           style={{ color: textColor }}>
                       {cell.date.getDate()}
                     </span>
@@ -658,35 +660,42 @@ function CalendarGrid({ cells, events, onCellClick, onEventClick, today }) {
                 </div>
               );
             })}
-            {/* 이벤트 막대 (absolute layer) */}
-            <div className="absolute inset-0 pointer-events-none"
-                 style={{ paddingTop: HEADER_HEIGHT, paddingLeft: 2, paddingRight: 2 }}>
+            {/* 이벤트 막대 (absolute layer) — absolute 자식은 paddingTop 무시하므로 top에 HEADER_HEIGHT 직접 더함 */}
+            <div className="absolute inset-0 pointer-events-none">
               {visible.map((p, i) => {
                 const ev = p.event;
                 const isExternal = ev.is_external;
                 const c = isExternal ? null : getAuthorColor(ev.author);
                 const isTrip = ev.leave_type_name === "출장";
+                const isPending = !isExternal && ev.status === "pending";
                 const widthPct = ((p.endCol - p.startCol + 1) / 7) * 100;
                 const leftPct = (p.startCol / 7) * 100;
-                const topPx = p.slotIdx * BAR_HEIGHT;
+                const topPx = HEADER_HEIGHT + p.slotIdx * (BAR_HEIGHT + BAR_GAP);
                 const label = isExternal
                   ? `📅 ${ev.summary}`
                   : `${isTrip ? "✈ " : ""}${ev.author} · ${ev.leave_type_name}${ev.destination ? " · " + ev.destination : ""}`;
+                // 색상 전략: 진한 배경 + 흰 글자 (모든 막대 통일). pending은 dashed border로 구분.
+                const bg = isExternal ? "#64748b" : c.bg;
+                const fg = "#ffffff";
                 return (
                   <div key={(ev.id || "x") + "-" + i + "-" + wi}
                        onClick={(e) => { e.stopPropagation(); onEventClick(ev); }}
-                       className="absolute text-[11px] px-1.5 py-0.5 rounded truncate cursor-pointer hover:opacity-80 pointer-events-auto"
+                       className="absolute rounded truncate cursor-pointer hover:opacity-90 pointer-events-auto shadow-sm"
                        style={{
-                         left: `calc(${leftPct}% + 2px)`,
-                         width: `calc(${widthPct}% - 4px)`,
+                         left: `calc(${leftPct}% + 3px)`,
+                         width: `calc(${widthPct}% - 6px)`,
                          top: topPx,
-                         height: BAR_HEIGHT - 3,
-                         lineHeight: `${BAR_HEIGHT - 5}px`,
-                         background: isExternal ? "#f1f5f9" : (ev.status === "approved" ? c.bg : c.soft),
-                         color: isExternal ? "#475569" : (ev.status === "approved" ? c.text : c.bg),
-                         borderLeft: isTrip ? `3px solid ${THEME.warn}` : "none",
+                         height: BAR_HEIGHT,
+                         lineHeight: `${BAR_HEIGHT - 2}px`,
+                         padding: "0 8px",
+                         fontSize: "12.5px",
+                         background: bg,
+                         color: fg,
+                         border: isPending ? `1.5px dashed rgba(255,255,255,0.55)` : "none",
+                         borderLeft: isTrip ? `4px solid ${THEME.warn}` : (isPending ? `1.5px dashed rgba(255,255,255,0.55)` : "none"),
                          fontStyle: isExternal ? "italic" : "normal",
-                         fontWeight: isExternal ? 500 : 600,
+                         fontWeight: 700,
+                         letterSpacing: "-0.2px",
                        }}
                        title={isExternal
                          ? `MGEO 캘린더 원본: ${ev.summary}\n${ev._start} ~ ${ev._end}\n${ev.description || ""}`
@@ -698,11 +707,11 @@ function CalendarGrid({ cells, events, onCellClick, onEventClick, today }) {
               {/* +N건 표시 (MAX_SLOTS 초과) */}
               {Object.entries(overflowByCol).map(([col, n]) => (
                 <div key={"of-" + col}
-                     className="absolute text-[10px] pointer-events-none"
+                     className="absolute text-[11px] font-bold pointer-events-none"
                      style={{
-                       left: `calc(${(Number(col) / 7) * 100}% + 4px)`,
-                       top: MAX_SLOTS * BAR_HEIGHT,
-                       color: THEME.sub,
+                       left: `calc(${(Number(col) / 7) * 100}% + 6px)`,
+                       top: HEADER_HEIGHT + MAX_SLOTS * (BAR_HEIGHT + BAR_GAP) + 2,
+                       color: THEME.accent,
                      }}>
                   +{n}건
                 </div>
