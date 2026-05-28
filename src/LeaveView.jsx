@@ -383,7 +383,10 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents }) {
       scope: CAL_SCOPE,
       callback: (resp) => {
         if (resp.error) {
-          setMsg({ kind: "err", text: `OAuth 실패: ${resp.error}` });
+          // silent 시도(prompt:'') 실패는 조용히 처리, 명시적 클릭(prompt:'consent') 실패만 표시
+          if (resp.error !== "popup_closed_by_user") {
+            setMsg({ kind: "err", text: `OAuth 실패: ${resp.error}` });
+          }
           setBusy(false); return;
         }
         const newToken = {
@@ -394,7 +397,24 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents }) {
         setToken(newToken);
       },
     });
+    // init 직후 silent 토큰 시도 — 이미 동의한 사용자면 popup 없이 자동 발급
+    const stored = loadStoredToken();
+    if (!stored || stored.expires_at <= Date.now() + 60_000) {
+      try { tokenClientRef.current.requestAccessToken({ prompt: "" }); } catch {}
+    }
   }, [gisReady, clientId]);
+
+  // 토큰 만료 5분 전 자동 silent refresh
+  useEffect(() => {
+    if (!token || !tokenClientRef.current) return;
+    const msLeft = token.expires_at - Date.now();
+    if (msLeft <= 0) return;
+    const refreshIn = Math.max(0, msLeft - 5 * 60 * 1000);
+    const t = setTimeout(() => {
+      try { tokenClientRef.current.requestAccessToken({ prompt: "" }); } catch {}
+    }, refreshIn);
+    return () => clearTimeout(t);
+  }, [token]);
 
   useEffect(() => {
     if (!token) return;
