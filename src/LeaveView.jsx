@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, X,
   Plane, Check, Clock, AlertCircle, Trash2,
@@ -204,7 +204,7 @@ export default function LeaveView() {
           </button>
         </div>
         <div className="flex items-center gap-2">
-          <GoogleCalendarSync />
+          <GoogleCalendarSync requests={requests} onSyncDone={reloadAll} />
           <button onClick={() => openNew(new Date())}
                   className="px-4 py-2 text-sm font-semibold rounded-md flex items-center gap-1.5 shadow-md hover:shadow-lg transition"
                   style={{ background: THEME.navy, color: "#fff" }}>
@@ -281,47 +281,172 @@ export default function LeaveView() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 구글 캘린더 연동 (MGEO 캘린더 양방향 sync)
+// 구글 캘린더 연동 (MGEO 캘린더 단방향 push: leave_requests → MGEO)
 // ─────────────────────────────────────────────────────────────
-// 현재는 OAuth 클라이언트 ID 대기 placeholder.
-// 토뭉이님이 Google Cloud Console에서 웹 애플리케이션 OAuth 클라이언트 ID를 만들고
-// 환경변수 VITE_GOOGLE_CLIENT_ID 로 등록하면 활성화됩니다.
-// 활성화 후 동작: MGEO 캘린더 이벤트 ↔ leave_requests 양방향 sync.
-function GoogleCalendarSync() {
-  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-  const enabled = !!clientId;
-  const [linked, setLinked] = useState(false);
+// Client ID는 공개정보(브라우저 노출 정상). 환경변수에 VITE_ 접두사가 없으면
+// 브라우저 빌드에서 못 읽으므로 fallback 하드코딩으로 동작 보장.
+const GOOGLE_CLIENT_ID_FALLBACK = "897631356111-45ul0ohnrosarqd669d3vlj70gg7kq2i.apps.googleusercontent.com";
+const GIS_SRC = "https://accounts.google.com/gsi/client";
+const CAL_SCOPE = "https://www.googleapis.com/auth/calendar";
 
-  function handleClick() {
-    if (!enabled) {
-      alert(
-        "구글 캘린더 연동 설정이 아직 안 되어 있습니다.\n\n" +
-        "1) Google Cloud Console에서 웹 OAuth 클라이언트 ID 생성\n" +
-        "   승인 출처: https://marinegeo-weekly-task-v2.vercel.app + http://localhost:5173\n" +
-        "2) Vercel 환경변수 VITE_GOOGLE_CLIENT_ID 등록\n" +
-        "3) 재배포 후 다시 시도\n\n" +
-        "사용 캘린더: MGEO (이름 매칭으로 자동 선택)"
-      );
+function GoogleCalendarSync({ requests, onSyncDone }) {
+  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID_FALLBACK;
+  const [gisReady, setGisReady] = useState(false);
+  const [token, setToken] = useState(null);
+  const [calendarId, setCalendarId] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const tokenClientRef = useRef(null);
+
+  useEffect(() => {
+    if (window.google?.accounts?.oauth2) { setGisReady(true); return; }
+    const existing = document.querySelector(`script[src="${GIS_SRC}"]`);
+    if (existing) { existing.addEventListener("load", () => setGisReady(true)); return; }
+    const s = document.createElement("script");
+    s.src = GIS_SRC; s.async = true; s.defer = true;
+    s.onload = () => setGisReady(true);
+    s.onerror = () => setMsg({ kind: "err", text: "Google Identity Services 로드 실패" });
+    document.head.appendChild(s);
+  }, []);
+
+  useEffect(() => {
+    if (!gisReady) return;
+    tokenClientRef.current = window.google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: CAL_SCOPE,
+      callback: (resp) => {
+        if (resp.error) {
+          setMsg({ kind: "err", text: `OAuth 실패: ${resp.error}` });
+          setBusy(false); return;
+        }
+        setToken({
+          access_token: resp.access_token,
+          expires_at: Date.now() + (Number(resp.expires_in || 3600) - 60) * 1000,
+        });
+      },
+    });
+  }, [gisReady, clientId]);
+
+  useEffect(() => {
+    if (!token) return;
+    (async () => {
+      try {
+        const r = await fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList", {
+          headers: { Authorization: `Bearer ${token.access_token}` },
+        });
+        const data = await r.json();
+        if (data.error) throw new Error(data.error.message);
+        const mgeo = (data.items || []).find(c => (c.summary || "").toUpperCase() === "MGEO");
+        if (!mgeo) {
+          setMsg({ kind: "err", text: "'MGEO' 캘린더를 찾지 못함. 구글 캘린더에 'MGEO' 이름으로 캘린더를 만들어주세요." });
+          return;
+        }
+        setCalendarId(mgeo.id);
+        setMsg({ kind: "ok", text: "MGEO 연결됨" });
+      } catch (e) {
+        setMsg({ kind: "err", text: `캘린더 조회 실패: ${e.message}` });
+      } finally {
+        setBusy(false);
+      }
+    })();
+  }, [token]);
+
+  function connect() {
+    if (!tokenClientRef.current) {
+      setMsg({ kind: "err", text: "Google Identity Services 준비 중" });
       return;
     }
-    // TODO Phase 2: gis.identity.oauth2 토큰 발급 → MGEO 캘린더 ID 조회 → 양방향 sync
-    setLinked(v => !v);
+    setMsg(null); setBusy(true);
+    tokenClientRef.current.requestAccessToken({ prompt: token ? "" : "consent" });
   }
 
+  async function syncToCalendar() {
+    if (!calendarId || !token || !requests?.length) return;
+    setBusy(true); setMsg(null);
+    let pushed = 0, updated = 0, errors = 0;
+    for (const req of requests) {
+      try {
+        if (req.status === "rejected" || req.status === "cancelled") continue;
+        const start = req.start_date;
+        const endRaw = req.end_date || req.start_date;
+        const endDt = new Date(endRaw);
+        endDt.setDate(endDt.getDate() + 1);
+        const endStr = ymd(endDt);
+        const summary = `[${req.author}] ${req.leave_type_name || "휴가"}${req.destination ? ` - ${req.destination}` : ""}`;
+        const description = [
+          `상태: ${statusKo(req.status)}`,
+          req.memo && `메모: ${req.memo}`,
+          req.companions && `동행: ${req.companions}`,
+          req.trip_purpose && `목적: ${req.trip_purpose}`,
+        ].filter(Boolean).join("\n");
+        const event = { summary, description, start: { date: start }, end: { date: endStr } };
+        const calUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
+        if (req.google_calendar_event_id) {
+          const r = await fetch(`${calUrl}/${req.google_calendar_event_id}`, {
+            method: "PATCH",
+            headers: { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json" },
+            body: JSON.stringify(event),
+          });
+          if (r.ok) updated++; else errors++;
+        } else {
+          const r = await fetch(calUrl, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json" },
+            body: JSON.stringify(event),
+          });
+          const data = await r.json();
+          if (data.id) {
+            await supabase.from("leave_requests")
+              .update({ google_calendar_event_id: data.id })
+              .eq("id", req.id);
+            pushed++;
+          } else errors++;
+        }
+      } catch (e) {
+        errors++;
+      }
+    }
+    setBusy(false);
+    alert(`MGEO 캘린더 동기화 완료\n신규 ${pushed}건 · 갱신 ${updated}건 · 실패 ${errors}건`);
+    if (onSyncDone) onSyncDone();
+  }
+
+  const valid = token && token.expires_at > Date.now();
+
   return (
-    <button onClick={handleClick}
-            className="px-3 py-2 text-xs font-semibold rounded-md border flex items-center gap-1.5 transition"
-            style={{
-              borderColor: enabled && linked ? THEME.green : THEME.line,
-              color: enabled && linked ? THEME.green : THEME.sub,
-              background: "#fff",
-            }}
-            title={enabled ? "구글 캘린더 MGEO와 양방향 연동" : "OAuth 설정 필요 — 클릭하여 안내 확인"}>
-      <Link2 size={12} />
-      {enabled
-        ? (linked ? "MGEO 연동 중" : "MGEO 캘린더 연동")
-        : "캘린더 연동 (설정 대기)"}
-    </button>
+    <div className="flex items-center gap-2">
+      {!valid && (
+        <button onClick={connect} disabled={!gisReady || busy}
+                className="px-3 py-2 text-xs font-semibold rounded-md border flex items-center gap-1.5"
+                style={{ borderColor: THEME.line, color: THEME.sub, background: "#fff",
+                         opacity: (!gisReady || busy) ? 0.5 : 1 }}
+                title="구글 계정으로 로그인 후 MGEO 캘린더 검색">
+          <Link2 size={12} />
+          {busy ? "연결 중..." : "MGEO 캘린더 연동"}
+        </button>
+      )}
+      {valid && calendarId && (
+        <>
+          <span className="px-2 py-1 text-xs rounded-md font-semibold"
+                style={{ background: THEME.accentSoft, color: THEME.accent }}>
+            MGEO 연결됨
+          </span>
+          <button onClick={syncToCalendar} disabled={busy}
+                  className="px-3 py-2 text-xs font-semibold rounded-md flex items-center gap-1.5"
+                  style={{ background: THEME.accent, color: "#fff", opacity: busy ? 0.6 : 1 }}
+                  title="leave_requests를 MGEO 캘린더 이벤트로 푸시">
+            <Link2 size={12} />
+            {busy ? "동기화 중..." : "캘린더 동기화"}
+          </button>
+        </>
+      )}
+      {msg && (
+        <span className="text-xs"
+              style={{ color: msg.kind === "err" ? THEME.warn : THEME.green }}>
+          {msg.text}
+        </span>
+      )}
+    </div>
   );
 }
 
