@@ -45,6 +45,15 @@ const STATUS_LABEL = {
 };
 function statusKo(s) { return STATUS_LABEL[s] || s; }
 
+const STATUS_OPTIONS = [
+  { value: "pending",   label: "대기" },
+  { value: "approved",  label: "승인" },
+  { value: "rejected",  label: "반려" },
+  { value: "cancelled", label: "취소" },
+];
+
+const DEFAULT_AUTHORS = ["김찬수", "최승표", "여은민"];
+
 // ─────────────────────────────────────────────────────────────
 // 헬퍼
 // ─────────────────────────────────────────────────────────────
@@ -870,11 +879,13 @@ function RecentRequestList({ requests, onEdit }) {
 // ─────────────────────────────────────────────────────────────
 // 신청·수정 모달
 // ─────────────────────────────────────────────────────────────
-function LeaveRequestModal({ init, leaveTypes, onClose, onSaved }) {
+function LeaveRequestModal({ init, leaveTypes, authors, onClose, onSaved }) {
   const isEdit = !!init?.request;
   const existing = init?.request;
+  // authors prop이 없거나 비어 있으면 기본 직원 명단 사용
+  const authorOptions = (authors && authors.length) ? authors : DEFAULT_AUTHORS;
 
-  const [author, setAuthor] = useState(existing?.author || "");
+  const [author, setAuthor] = useState(existing?.author || authorOptions[0] || "");
   const [leaveTypeId, setLeaveTypeId] = useState(existing?.leave_type_id || (leaveTypes[0]?.id || ""));
   const [startDate, setStartDate] = useState(existing?.start_date || init?.date || ymd(new Date()));
   const [endDate, setEndDate] = useState(existing?.end_date || existing?.start_date || init?.date || ymd(new Date()));
