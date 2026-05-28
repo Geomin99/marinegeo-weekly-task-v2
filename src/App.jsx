@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
-import { Search, Plus, Calendar, Users, ChevronDown, ChevronRight, X, Filter, RefreshCw, Loader2, Trash2, AlertCircle, ChevronLeft, Save, Check } from "lucide-react";
+import { Search, Plus, Calendar, Users, ChevronDown, ChevronRight, X, Filter, RefreshCw, Loader2, Trash2, AlertCircle, ChevronLeft, Save, Check, Plane } from "lucide-react";
 import { supabase } from "./supabaseClient";
+import LeaveView from "./LeaveView.jsx";
 
 // ===== 작성자 아바타 색상 =====
 const AVATAR_COLORS = [
@@ -467,6 +468,7 @@ function Edit3Icon() {
 }
 
 export default function App() {
+  const [view, setView] = useState("journal");  // 'journal' | 'leave'
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -634,31 +636,50 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900" style={{ fontFamily: "'Noto Sans KR', system-ui, sans-serif" }}>
-      <header className="sticky top-0 z-10 relative overflow-hidden" style={{ background: "linear-gradient(135deg, #0c4a6e 0%, #075985 100%)" }}>
-        <div className="absolute bottom-0 left-0 right-0 h-0.5" style={{ background: "linear-gradient(90deg, transparent 0%, #fbbf24 30%, #fbbf24 70%, transparent 100%)" }}></div>
+      <header className="sticky top-0 z-10 relative overflow-hidden" style={{ background: "linear-gradient(135deg, #1f3a5f 0%, #245f9a 100%)" }}>
+        <div className="absolute bottom-0 left-0 right-0 h-0.5" style={{ background: "linear-gradient(90deg, transparent 0%, #0b7cc1 30%, #14a8e8 70%, transparent 100%)" }}></div>
         <div className="px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 bg-white/15 rounded-lg flex items-center justify-center backdrop-blur">
               <Calendar size={18} className="text-white" />
             </div>
             <div>
-              <h1 className="text-white text-lg font-medium tracking-tight">주간업무일지</h1>
-              <p className="text-white/70 text-xs mt-0.5">마린엔지오 · {getTodayKorean()}</p>
+              <h1 className="text-white text-lg font-medium tracking-tight">마린엔지오 사내 시스템</h1>
+              <p className="text-white/70 text-xs mt-0.5">{view === "journal" ? "주간업무일지" : "휴가·출장 관리"} · {getTodayKorean()}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={fetchEntries} className="px-3 py-1.5 text-sm text-white bg-white/10 hover:bg-white/20 border border-white/20 rounded-md flex items-center gap-1.5 transition">
-              <RefreshCw size={14} />
-              새로고침
-            </button>
-            <button onClick={handleNewEntry} disabled={newEntry !== null} className="px-4 py-1.5 text-sm font-semibold rounded-md flex items-center gap-1.5 transition shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed" style={{ background: "#fbbf24", color: "#422006" }}>
-              <Plus size={15} strokeWidth={3} />
-              새 일지
-            </button>
+            {/* 탭 */}
+            <div className="flex bg-white/10 border border-white/20 rounded-md p-0.5 mr-2">
+              <button onClick={() => setView("journal")}
+                      className={"px-3 py-1 text-xs font-semibold rounded transition " + (view === "journal" ? "bg-white text-[#1f3a5f]" : "text-white/80 hover:text-white")}>
+                일지
+              </button>
+              <button onClick={() => setView("leave")}
+                      className={"px-3 py-1 text-xs font-semibold rounded transition flex items-center gap-1 " + (view === "leave" ? "bg-white text-[#1f3a5f]" : "text-white/80 hover:text-white")}>
+                <Plane size={12} /> 휴가·출장
+              </button>
+            </div>
+            {view === "journal" && (
+              <>
+                <button onClick={fetchEntries} className="px-3 py-1.5 text-sm text-white bg-white/10 hover:bg-white/20 border border-white/20 rounded-md flex items-center gap-1.5 transition">
+                  <RefreshCw size={14} />
+                  새로고침
+                </button>
+                <button onClick={handleNewEntry} disabled={newEntry !== null} className="px-4 py-1.5 text-sm font-semibold rounded-md flex items-center gap-1.5 transition shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed" style={{ background: "#0b7cc1", color: "#fff" }}>
+                  <Plus size={15} strokeWidth={3} />
+                  새 일지
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
 
+      {/* ── 휴가·출장 화면 ─────────────────────────── */}
+      {view === "leave" && <LeaveView />}
+
+      {view === "journal" && (
       <div className="px-6 py-6 grid grid-cols-12 gap-6">
         <aside className="col-span-2 space-y-3">
           <div className="bg-white border border-sky-100 rounded-lg p-4">
@@ -785,6 +806,7 @@ export default function App() {
           )}
         </main>
       </div>
+      )}
     </div>
   );
 }
