@@ -232,18 +232,9 @@ export default function LeaveView() {
 
   function openEdit(request) {
     if (request.is_external) {
-      const info = [
-        `📅 MGEO 캘린더 원본 이벤트`,
-        ``,
-        `제목: ${request.summary}`,
-        `기간: ${request.start_date} ~ ${request.end_date}`,
-        request.description ? `\n메모:\n${request.description}` : "",
-        ``,
-        `이 이벤트는 사이트의 휴가 신청이 아닌 구글 캘린더 원본입니다.`,
-        `사이트로 가져오려면 "신청" 버튼으로 직접 등록하거나,`,
-        `다음 업데이트에서 추가될 "캘린더에서 가져오기" 기능을 기다려주세요.`,
-      ].filter(Boolean).join("\n");
-      alert(info);
+      // 외부 MGEO 이벤트를 사이트 신청으로 변환하는 모달 (prefill)
+      setModalInit({ externalEvent: request });
+      setModalOpen(true);
       return;
     }
     setModalInit({ request });
@@ -903,21 +894,38 @@ function RecentRequestList({ requests, onEdit }) {
 function LeaveRequestModal({ init, leaveTypes, authors, onClose, onSaved }) {
   const isEdit = !!init?.request;
   const existing = init?.request;
+  const ext = init?.externalEvent;  // 외부 MGEO 이벤트 → 변환 모드
   // authors prop이 없거나 비어 있으면 기본 직원 명단 사용
   const authorOptions = (authors && authors.length) ? authors : DEFAULT_AUTHORS;
 
+  // 외부 변환 시 종류 추정: summary에 "회의"·"외근"·"휴가" 등 키워드 있으면 매칭
+  const extDefaultTypeId = useMemo(() => {
+    if (!ext || !leaveTypes.length) return "";
+    const s = (ext.summary || "").toLowerCase();
+    const guess = leaveTypes.find(t => s.includes(t.name.toLowerCase()));
+    if (guess) return guess.id;
+    // 시간 지정 이벤트면 회의, 종일이면 기타
+    const fallback = leaveTypes.find(t => t.name === (ext.is_all_day === false ? "회의" : "기타"));
+    return fallback?.id || leaveTypes[0]?.id || "";
+  }, [ext, leaveTypes]);
+
   const [author, setAuthor] = useState(existing?.author || authorOptions[0] || "");
-  const [leaveTypeId, setLeaveTypeId] = useState(existing?.leave_type_id || (leaveTypes[0]?.id || ""));
-  const [startDate, setStartDate] = useState(existing?.start_date || init?.date || ymd(new Date()));
-  const [endDate, setEndDate] = useState(existing?.end_date || existing?.start_date || init?.date || ymd(new Date()));
-  const [isAllDay, setIsAllDay] = useState(existing?.is_all_day !== false);  // default 종일
-  const [startTime, setStartTime] = useState(hhmm(existing?.start_time) || "09:30");
-  const [endTime, setEndTime] = useState(hhmm(existing?.end_time) || "10:30");
+  const [leaveTypeId, setLeaveTypeId] = useState(existing?.leave_type_id || extDefaultTypeId || (leaveTypes[0]?.id || ""));
+  const [startDate, setStartDate] = useState(existing?.start_date || ext?._start || ext?.start_date || init?.date || ymd(new Date()));
+  const [endDate, setEndDate] = useState(existing?.end_date || existing?.start_date || ext?._end || ext?._start || init?.date || ymd(new Date()));
+  const [isAllDay, setIsAllDay] = useState(
+    existing ? existing.is_all_day !== false : (ext ? ext.is_all_day !== false : true)
+  );
+  const [startTime, setStartTime] = useState(hhmm(existing?.start_time) || ext?.start_time || "09:30");
+  const [endTime, setEndTime] = useState(hhmm(existing?.end_time) || (ext?.is_all_day === false ? "10:30" : "10:30"));
   const [destination, setDestination] = useState(existing?.destination || "");
   const [companions, setCompanions] = useState(existing?.companions || "");
   const [tripPurpose, setTripPurpose] = useState(existing?.trip_purpose || "");
-  const [memo, setMemo] = useState(existing?.memo || "");
-  const [status, setStatus] = useState(existing?.status || "pending");
+  const [memo, setMemo] = useState(
+    existing?.memo ||
+    (ext ? `[MGEO 캘린더 원본]\n${ext.summary || ""}${ext.description ? "\n\n" + ext.description : ""}` : "")
+  );
+  const [status, setStatus] = useState(existing?.status || (ext ? "approved" : "pending"));
   const [approver, setApprover] = useState(existing?.approver || "");
   const [saving, setSaving] = useState(false);
 
@@ -967,6 +975,8 @@ function LeaveRequestModal({ init, leaveTypes, authors, onClose, onSaved }) {
       companions: isTrip ? (companions || null) : null,
       trip_purpose: isTrip ? (tripPurpose || null) : null,
       memo: memo || null,
+      // 외부 변환 시 google_calendar_event_id 매칭 → 다음 sync 때 PATCH로 캘린더 이벤트 갱신
+      ...(ext?.id ? { google_calendar_event_id: ext.id } : {}),
       updated_at: new Date().toISOString(),
     };
 
@@ -1002,13 +1012,21 @@ function LeaveRequestModal({ init, leaveTypes, authors, onClose, onSaved }) {
              style={{ background: THEME.navy, color: "#fff" }}>
           <div className="flex items-center gap-2">
             {isTrip ? <Plane size={18} /> : <CalendarIcon size={18} />}
-            <h3 className="font-bold">{isEdit ? "신청 수정" : "신규 신청"}</h3>
+            <h3 className="font-bold">{isEdit ? "신청 수정" : (ext ? "캘린더 일정 → 사이트 신청 변환" : "신규 신청")}</h3>
           </div>
           <button onClick={onClose} className="hover:opacity-70"><X size={18} /></button>
         </div>
 
         {/* 본문 */}
         <div className="p-5 space-y-3 text-sm">
+          {ext && (
+            <div className="rounded-md p-3 text-xs"
+                 style={{ background: "#fff7e6", border: "1px solid #f3c98a", color: "#7a4a00" }}>
+              <div className="font-bold mb-1">📥 MGEO 캘린더 원본 이벤트를 사이트 신청으로 변환</div>
+              <div>원본: <span className="font-semibold">{ext.summary}</span></div>
+              <div>저장하면 사이트 데이터로 등록 + 캘린더 이벤트도 사이트 형식(`[직원] 종류`)으로 갱신됩니다.</div>
+            </div>
+          )}
           <div className="grid grid-cols-3 gap-3">
             <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>성명</label>
             <select value={author} onChange={(e) => setAuthor(e.target.value)}
