@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import {
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, X,
   Plane, Check, Clock, AlertCircle, Trash2,
+  ChevronDown, ChevronUp, Users, Link2,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -34,6 +35,15 @@ const AUTHOR_COLORS = {
 function getAuthorColor(name) {
   return AUTHOR_COLORS[name] || { bg: "#56657a", text: "#ffffff", soft: "#f1f3f5" };
 }
+
+// 상태 한글 매핑
+const STATUS_LABEL = {
+  pending:   "대기",
+  approved:  "승인",
+  rejected:  "반려",
+  cancelled: "취소",
+};
+function statusKo(s) { return STATUS_LABEL[s] || s; }
 
 // ─────────────────────────────────────────────────────────────
 // 헬퍼
@@ -95,6 +105,7 @@ export default function LeaveView() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalInit, setModalInit] = useState(null);  // {date} or {request}
+  const [showBalances, setShowBalances] = useState(false);  // 개인정보 보호 — 기본 숨김
 
   // 초기 로드
   useEffect(() => { reloadAll(); }, []);
@@ -172,9 +183,6 @@ export default function LeaveView() {
 
   return (
     <div className="px-6 py-6">
-      {/* ── 직원별 잔여 카드 ──────────────────────── */}
-      <EmployeeBalanceCards balances={balanceWithUsage} />
-
       {/* ── 달력 헤더 ───────────────────────────── */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
@@ -195,15 +203,18 @@ export default function LeaveView() {
             오늘
           </button>
         </div>
-        <button onClick={() => openNew(new Date())}
-                className="px-4 py-2 text-sm font-semibold rounded-md flex items-center gap-1.5 shadow-md hover:shadow-lg transition"
-                style={{ background: THEME.navy, color: "#fff" }}>
-          <Plus size={15} strokeWidth={3} />
-          신청
-        </button>
+        <div className="flex items-center gap-2">
+          <GoogleCalendarSync />
+          <button onClick={() => openNew(new Date())}
+                  className="px-4 py-2 text-sm font-semibold rounded-md flex items-center gap-1.5 shadow-md hover:shadow-lg transition"
+                  style={{ background: THEME.navy, color: "#fff" }}>
+            <Plus size={15} strokeWidth={3} />
+            신청
+          </button>
+        </div>
       </div>
 
-      {/* ── 달력 그리드 ───────────────────────── */}
+      {/* ── 달력 그리드 (메인 영역, 세로 더 큼) ───────── */}
       <CalendarGrid
         cells={cells}
         eventsByDate={eventsByDate}
@@ -225,11 +236,31 @@ export default function LeaveView() {
         ))}
         <span className="ml-4">상태:</span>
         <span className="flex items-center gap-1.5">
-          <Clock size={12} /> pending
+          <Clock size={12} /> 대기
         </span>
         <span className="flex items-center gap-1.5">
-          <Check size={12} style={{ color: THEME.green }} /> approved
+          <Check size={12} style={{ color: THEME.green }} /> 승인
         </span>
+      </div>
+
+      {/* ── 직원별 잔여 (달력 아래, 클릭으로 토글 — 개인정보 보호) ──── */}
+      <div className="mt-6 rounded-xl border" style={{ background: "#fff", borderColor: THEME.line }}>
+        <button onClick={() => setShowBalances(v => !v)}
+                className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 rounded-xl">
+          <div className="flex items-center gap-2">
+            <Users size={14} style={{ color: THEME.navy }} />
+            <span className="text-sm font-bold" style={{ color: THEME.navy }}>직원별 휴가 현황</span>
+            <span className="text-xs" style={{ color: THEME.sub }}>(개인정보 — 클릭하여 상세)</span>
+          </div>
+          {showBalances
+            ? <ChevronUp size={16} style={{ color: THEME.sub }} />
+            : <ChevronDown size={16} style={{ color: THEME.sub }} />}
+        </button>
+        {showBalances && (
+          <div className="px-4 pb-4">
+            <EmployeeBalanceCards balances={balanceWithUsage} />
+          </div>
+        )}
       </div>
 
       {/* ── 최근 신청 목록 ─────────────────────── */}
@@ -240,11 +271,57 @@ export default function LeaveView() {
         <LeaveRequestModal
           init={modalInit}
           leaveTypes={leaveTypes}
+          authors={balances.map(b => b.author)}
           onClose={() => setModalOpen(false)}
           onSaved={() => { setModalOpen(false); reloadAll(); }}
         />
       )}
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// 구글 캘린더 연동 (MGEO 캘린더 양방향 sync)
+// ─────────────────────────────────────────────────────────────
+// 현재는 OAuth 클라이언트 ID 대기 placeholder.
+// 토뭉이님이 Google Cloud Console에서 웹 애플리케이션 OAuth 클라이언트 ID를 만들고
+// 환경변수 VITE_GOOGLE_CLIENT_ID 로 등록하면 활성화됩니다.
+// 활성화 후 동작: MGEO 캘린더 이벤트 ↔ leave_requests 양방향 sync.
+function GoogleCalendarSync() {
+  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  const enabled = !!clientId;
+  const [linked, setLinked] = useState(false);
+
+  function handleClick() {
+    if (!enabled) {
+      alert(
+        "구글 캘린더 연동 설정이 아직 안 되어 있습니다.\n\n" +
+        "1) Google Cloud Console에서 웹 OAuth 클라이언트 ID 생성\n" +
+        "   승인 출처: https://marinegeo-weekly-task-v2.vercel.app + http://localhost:5173\n" +
+        "2) Vercel 환경변수 VITE_GOOGLE_CLIENT_ID 등록\n" +
+        "3) 재배포 후 다시 시도\n\n" +
+        "사용 캘린더: MGEO (이름 매칭으로 자동 선택)"
+      );
+      return;
+    }
+    // TODO Phase 2: gis.identity.oauth2 토큰 발급 → MGEO 캘린더 ID 조회 → 양방향 sync
+    setLinked(v => !v);
+  }
+
+  return (
+    <button onClick={handleClick}
+            className="px-3 py-2 text-xs font-semibold rounded-md border flex items-center gap-1.5 transition"
+            style={{
+              borderColor: enabled && linked ? THEME.green : THEME.line,
+              color: enabled && linked ? THEME.green : THEME.sub,
+              background: "#fff",
+            }}
+            title={enabled ? "구글 캘린더 MGEO와 양방향 연동" : "OAuth 설정 필요 — 클릭하여 안내 확인"}>
+      <Link2 size={12} />
+      {enabled
+        ? (linked ? "MGEO 연동 중" : "MGEO 캘린더 연동")
+        : "캘린더 연동 (설정 대기)"}
+    </button>
   );
 }
 
@@ -322,43 +399,44 @@ function CalendarGrid({ cells, eventsByDate, onCellClick, onEventClick, today })
           return (
             <div key={idx}
                  onClick={() => onCellClick(cell.date)}
-                 className="border-b border-r p-1.5 cursor-pointer hover:bg-slate-50 transition"
+                 className="border-b border-r p-2 cursor-pointer hover:bg-slate-50 transition"
                  style={{
-                   minHeight: 88,
+                   minHeight: 130,
                    borderColor: THEME.line2,
                    background: cell.other ? "#fafbfc" : isToday ? THEME.accentSoft : "#fff",
                    opacity: cell.other ? 0.45 : 1,
                  }}>
-              <div className="flex items-center justify-between mb-1">
-                <span className={"text-xs " + (isToday ? "font-bold" : "")}
+              <div className="flex items-center justify-between mb-1.5">
+                <span className={"text-sm " + (isToday ? "font-bold" : "")}
                       style={{ color: textColor }}>
                   {cell.date.getDate()}
                 </span>
                 {isToday && (
-                  <span className="text-[9px] font-bold px-1 rounded"
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded"
                         style={{ background: THEME.accent, color: "#fff" }}>오늘</span>
                 )}
               </div>
-              <div className="space-y-0.5">
-                {events.slice(0, 3).map((e, i) => {
+              <div className="space-y-1">
+                {events.slice(0, 4).map((e, i) => {
                   const c = getAuthorColor(e.author);
                   const isTrip = e.leave_type_name === "출장";
                   return (
                     <div key={i}
                          onClick={(ev) => { ev.stopPropagation(); onEventClick(e); }}
-                         className="text-[10px] px-1.5 py-0.5 rounded truncate cursor-pointer hover:opacity-80"
+                         className="text-[11px] px-1.5 py-1 rounded truncate cursor-pointer hover:opacity-80"
                          style={{
                            background: e.status === "approved" ? c.bg : c.soft,
                            color: e.status === "approved" ? c.text : c.bg,
-                           borderLeft: isTrip ? `2px solid ${THEME.warn}` : "none",
+                           borderLeft: isTrip ? `3px solid ${THEME.warn}` : "none",
+                           fontWeight: 600,
                          }}
-                         title={`${e.author} · ${e.leave_type_name}${e.destination ? " · " + e.destination : ""}`}>
+                         title={`${e.author} · ${e.leave_type_name}${e.destination ? " · " + e.destination : ""} · ${statusKo(e.status)}`}>
                       {isTrip && "✈ "}{e.author} · {e.leave_type_name}
                     </div>
                   );
                 })}
-                {events.length > 3 && (
-                  <div className="text-[9px]" style={{ color: THEME.sub }}>+{events.length - 3}건</div>
+                {events.length > 4 && (
+                  <div className="text-[10px]" style={{ color: THEME.sub }}>+{events.length - 4}건</div>
                 )}
               </div>
             </div>
@@ -399,7 +477,7 @@ function RecentRequestList({ requests, onEdit }) {
               </span>
               <span className="ml-auto flex items-center gap-1 text-xs" style={{ color: statusColor }}>
                 <StatusIcon size={13} />
-                {r.status}
+                {statusKo(r.status)}
               </span>
             </div>
           );
@@ -507,10 +585,13 @@ function LeaveRequestModal({ init, leaveTypes, onClose, onSaved }) {
         <div className="p-5 space-y-3 text-sm">
           <div className="grid grid-cols-3 gap-3">
             <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>성명</label>
-            <input type="text" value={author} onChange={(e) => setAuthor(e.target.value)}
-                   placeholder="예: 김찬수"
-                   className="col-span-2 px-3 py-2 border rounded-md outline-none"
-                   style={{ borderColor: THEME.line }} />
+            <select value={author} onChange={(e) => setAuthor(e.target.value)}
+                    className="col-span-2 px-3 py-2 border rounded-md outline-none"
+                    style={{ borderColor: THEME.line }}>
+              {authorOptions.map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
           </div>
           <div className="grid grid-cols-3 gap-3">
             <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>종류</label>
@@ -567,19 +648,22 @@ function LeaveRequestModal({ init, leaveTypes, onClose, onSaved }) {
             <select value={status} onChange={(e) => setStatus(e.target.value)}
                     className="col-span-2 px-3 py-2 border rounded-md outline-none"
                     style={{ borderColor: THEME.line }}>
-              <option value="pending">pending (대기)</option>
-              <option value="approved">approved (승인)</option>
-              <option value="rejected">rejected (반려)</option>
-              <option value="cancelled">cancelled (취소)</option>
+              {STATUS_OPTIONS.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
             </select>
           </div>
           {(status === "approved" || status === "rejected") && (
             <div className="grid grid-cols-3 gap-3">
               <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>승인자</label>
-              <input type="text" value={approver} onChange={(e) => setApprover(e.target.value)}
-                     placeholder="예: 여은민"
-                     className="col-span-2 px-3 py-2 border rounded-md outline-none"
-                     style={{ borderColor: THEME.line }} />
+              <select value={approver} onChange={(e) => setApprover(e.target.value)}
+                      className="col-span-2 px-3 py-2 border rounded-md outline-none"
+                      style={{ borderColor: THEME.line }}>
+                <option value="">선택 안 함</option>
+                {authorOptions.map(name => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
             </div>
           )}
           <div className="grid grid-cols-3 gap-3">
