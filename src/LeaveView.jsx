@@ -111,8 +111,9 @@ function mergeContinuousEvents(events) {
         current = { ...ev, _mergedIds: [ev.id] };
         continue;
       }
+      // all-day 이벤트끼리만 합침 (시간 지정 이벤트는 별개 유지)
       // Google all-day의 end_date는 exclusive: 이전 이벤트의 end_date == 현재 이벤트의 start_date 이면 인접
-      if (current.end_date === ev.start_date) {
+      if (current.is_all_day && ev.is_all_day && current.end_date === ev.start_date) {
         current.end_date = ev.end_date;
         current._mergedIds.push(ev.id);
       } else {
@@ -341,11 +342,23 @@ export default function LeaveView() {
 const GOOGLE_CLIENT_ID_FALLBACK = "897631356111-45ul0ohnrosarqd669d3vlj70gg7kq2i.apps.googleusercontent.com";
 const GIS_SRC = "https://accounts.google.com/gsi/client";
 const CAL_SCOPE = "https://www.googleapis.com/auth/calendar";
+const TOKEN_STORAGE_KEY = "mgeo_gcal_token_v1";
+
+function loadStoredToken() {
+  try {
+    const raw = localStorage.getItem(TOKEN_STORAGE_KEY);
+    if (!raw) return null;
+    const t = JSON.parse(raw);
+    if (!t?.access_token || !t?.expires_at) return null;
+    if (t.expires_at <= Date.now()) return null;
+    return t;
+  } catch { return null; }
+}
 
 function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents }) {
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID_FALLBACK;
   const [gisReady, setGisReady] = useState(false);
-  const [token, setToken] = useState(null);
+  const [token, setToken] = useState(() => loadStoredToken());  // 페이지 로드 시 localStorage에서 복원
   const [calendarId, setCalendarId] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -373,10 +386,12 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents }) {
           setMsg({ kind: "err", text: `OAuth 실패: ${resp.error}` });
           setBusy(false); return;
         }
-        setToken({
+        const newToken = {
           access_token: resp.access_token,
           expires_at: Date.now() + (Number(resp.expires_in || 3600) - 60) * 1000,
-        });
+        };
+        try { localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(newToken)); } catch {}
+        setToken(newToken);
       },
     });
   }, [gisReady, clientId]);
@@ -425,20 +440,36 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents }) {
       const data = await r.json();
       if (data.error) throw new Error(data.error.message);
       const rawEvents = (data.items || []).map(ev => {
-        // all-day: ev.start.date / 시간 지정: ev.start.dateTime
+        // 빈 제목 이벤트는 제외
+        if (!ev.summary || !ev.summary.trim()) return null;
+        const isAllDay = !!ev.start?.date;
         const startStr = ev.start?.date || (ev.start?.dateTime || "").slice(0, 10);
-        const endStr = ev.end?.date || (ev.end?.dateTime || "").slice(0, 10);
+        let endStr = ev.end?.date || (ev.end?.dateTime || "").slice(0, 10);
         if (!startStr || !endStr) return null;
+        // 시간 지정 이벤트면 end가 같은 날일 수도 있음. all-day와 동일하게 exclusive로 정규화
+        if (!isAllDay && endStr === startStr) {
+          const d = new Date(endStr);
+          d.setDate(d.getDate() + 1);
+          endStr = ymd(d);
+        }
+        // 시간 추출 (HH:MM 형태, KST 등 로컬 시간대 기준)
+        let startTime = null;
+        if (ev.start?.dateTime) {
+          const dt = new Date(ev.start.dateTime);
+          startTime = `${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
+        }
         return {
           is_external: true,
+          is_all_day: isAllDay,
+          start_time: startTime,
           id: ev.id,
-          summary: ev.summary || "(제목 없음)",
+          summary: ev.summary.trim(),
           description: ev.description || "",
           start_date: startStr,
-          end_date: endStr,  // Google all-day는 exclusive
+          end_date: endStr,  // exclusive (Google all-day와 통일)
           html_link: ev.htmlLink,
           author: "(MGEO 캘린더)",
-          leave_type_name: ev.summary || "외부 일정",
+          leave_type_name: ev.summary.trim(),
           status: "external",
         };
       }).filter(Boolean);
@@ -462,13 +493,15 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents }) {
     tokenClientRef.current.requestAccessToken({ prompt: token ? "" : "consent" });
   }
 
-  async function syncToCalendar() {
+  async function syncToCalendar(opts = {}) {
+    const { silent = false, onlyNew = false } = opts;
     if (!calendarId || !token || !requests?.length) return;
-    setBusy(true); setMsg(null);
+    if (!silent) { setBusy(true); setMsg(null); }
     let pushed = 0, updated = 0, errors = 0;
     for (const req of requests) {
       try {
         if (req.status === "rejected" || req.status === "cancelled") continue;
+        if (onlyNew && req.google_calendar_event_id) continue;  // 신규만 push
         const start = req.start_date;
         const endRaw = req.end_date || req.start_date;
         const endDt = new Date(endRaw);
@@ -508,12 +541,31 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents }) {
         errors++;
       }
     }
-    setBusy(false);
-    alert(`MGEO 캘린더 동기화 완료\n신규 ${pushed}건 · 갱신 ${updated}건 · 실패 ${errors}건`);
-    if (onSyncDone) onSyncDone();
+    if (!silent) setBusy(false);
+    if (silent) {
+      if (pushed || updated || errors) {
+        setMsg({ kind: errors ? "err" : "ok",
+                 text: `자동 동기화: 신규 ${pushed} · 갱신 ${updated}${errors ? " · 실패 " + errors : ""}` });
+      }
+    } else {
+      alert(`MGEO 캘린더 동기화 완료\n신규 ${pushed}건 · 갱신 ${updated}건 · 실패 ${errors}건`);
+    }
+    if (onSyncDone && (pushed || updated)) onSyncDone();
   }
 
   const valid = token && token.expires_at > Date.now();
+
+  // 자동 동기화: token+calendarId 있고 아직 push 안 된 신청이 있으면 1.5초 후 silent push
+  useEffect(() => {
+    if (!valid || !calendarId || !requests?.length) return;
+    const needPush = requests.some(r =>
+      !r.google_calendar_event_id &&
+      r.status !== "rejected" && r.status !== "cancelled"
+    );
+    if (!needPush) return;
+    const t = setTimeout(() => { syncToCalendar({ silent: true, onlyNew: true }); }, 1500);
+    return () => clearTimeout(t);
+  }, [valid, calendarId, requests]);
 
   return (
     <div className="flex items-center gap-2">
@@ -528,19 +580,12 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents }) {
         </button>
       )}
       {valid && calendarId && (
-        <>
-          <span className="px-2 py-1 text-xs rounded-md font-semibold"
-                style={{ background: THEME.accentSoft, color: THEME.accent }}>
-            MGEO 연결됨
-          </span>
-          <button onClick={syncToCalendar} disabled={busy}
-                  className="px-3 py-2 text-xs font-semibold rounded-md flex items-center gap-1.5"
-                  style={{ background: THEME.accent, color: "#fff", opacity: busy ? 0.6 : 1 }}
-                  title="leave_requests를 MGEO 캘린더 이벤트로 푸시">
-            <Link2 size={12} />
-            {busy ? "동기화 중..." : "캘린더 동기화"}
-          </button>
-        </>
+        <span className="px-2 py-1 text-xs rounded-md font-semibold flex items-center gap-1"
+              style={{ background: THEME.accentSoft, color: THEME.accent }}
+              title="신청·수정 시 자동으로 MGEO 캘린더에 반영됩니다">
+          <Link2 size={12} />
+          MGEO 자동 동기화 중
+        </span>
       )}
       {msg && (
         <span className="text-xs"
@@ -710,7 +755,7 @@ function CalendarGrid({ cells, events, onCellClick, onEventClick, today }) {
                 const leftPct = (p.startCol / 7) * 100;
                 const topPx = HEADER_HEIGHT + p.slotIdx * (BAR_HEIGHT + BAR_GAP);
                 const label = isExternal
-                  ? `📅 ${ev.summary}`
+                  ? `${ev.start_time ? `🕐 ${ev.start_time} ` : "📅 "}${ev.summary}`
                   : `${isTrip ? "✈ " : ""}${ev.author} · ${ev.leave_type_name}${ev.destination ? " · " + ev.destination : ""}`;
                 // 색상 전략: 진한 배경 + 흰 글자 (모든 막대 통일). pending은 dashed border로 구분.
                 const bg = isExternal ? "#64748b" : c.bg;
