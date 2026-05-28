@@ -127,36 +127,23 @@ export default function LeaveView() {
   // 월별 그리드 셀
   const cells = useMemo(() => getMonthGrid(year, month), [year, month]);
 
-  // 셀별 이벤트 매핑 (사이트 신청 + 외부 MGEO 캘린더 이벤트)
-  const eventsByDate = useMemo(() => {
-    const map = {};
-    // 1) Supabase leave_requests
-    requests.forEach(r => {
-      const s = r.start_date;
-      const e = r.end_date || r.start_date;
-      const cur = new Date(s);
-      const end = new Date(e);
-      while (cur <= end) {
-        const key = ymd(cur);
-        if (!map[key]) map[key] = [];
-        map[key].push(r);
-        cur.setDate(cur.getDate() + 1);
-      }
-    });
-    // 2) MGEO 캘린더 외부 이벤트 (사이트로 안 가져온 원본)
+  // 합쳐진 이벤트 (사이트 신청 + 외부 MGEO 캘린더) — 가로 spanning bar용
+  const allEvents = useMemo(() => {
     const knownGcalIds = new Set(requests.map(r => r.google_calendar_event_id).filter(Boolean));
-    externalEvents.forEach(ev => {
-      if (knownGcalIds.has(ev.id)) return;  // 이미 사이트에 있는 이벤트는 중복 표시 X
-      const cur = new Date(ev.start_date);
-      const end = new Date(ev.end_date);
-      while (cur < end) {  // Google all-day는 end exclusive
-        const key = ymd(cur);
-        if (!map[key]) map[key] = [];
-        map[key].push(ev);
-        cur.setDate(cur.getDate() + 1);
-      }
-    });
-    return map;
+    const fromRequests = requests.map(r => ({
+      ...r,
+      _start: r.start_date,
+      _end: r.end_date || r.start_date,  // inclusive
+    }));
+    const fromExternal = externalEvents
+      .filter(ev => !knownGcalIds.has(ev.id))
+      .map(ev => {
+        // Google all-day end는 exclusive → 하루 빼서 inclusive로
+        const endDt = new Date(ev.end_date);
+        endDt.setDate(endDt.getDate() - 1);
+        return { ...ev, _start: ev.start_date, _end: ymd(endDt) };
+      });
+    return [...fromRequests, ...fromExternal];
   }, [requests, externalEvents]);
 
   // 직원별 잔여 (annual_leave_balances + 사용 합산)
@@ -248,7 +235,7 @@ export default function LeaveView() {
       {/* ── 달력 그리드 (메인 영역, 세로 더 큼) ───────── */}
       <CalendarGrid
         cells={cells}
-        eventsByDate={eventsByDate}
+        events={allEvents}
         onCellClick={openNew}
         onEventClick={openEdit}
         today={today}
@@ -578,90 +565,152 @@ function EmployeeBalanceCards({ balances }) {
 // ─────────────────────────────────────────────────────────────
 // 달력 그리드
 // ─────────────────────────────────────────────────────────────
-function CalendarGrid({ cells, eventsByDate, onCellClick, onEventClick, today }) {
+// 한 주(week) 내에서 이벤트들을 spanning bar로 배치 (구글 캘린더 스타일)
+function layoutWeek(week, events) {
+  const weekStart = ymd(week[0].date);
+  const weekEnd = ymd(week[6].date);
+  // 이 week에 걸치는 이벤트만
+  const visible = events.filter(ev => ev._start <= weekEnd && ev._end >= weekStart);
+  // 시작일 순 정렬 (긴 이벤트 우선)
+  visible.sort((a, b) => {
+    if (a._start !== b._start) return a._start.localeCompare(b._start);
+    return b._end.localeCompare(a._end);
+  });
+  // slot 할당
+  const slots = [];  // slots[i] = [{startCol, endCol}, ...]
+  const placed = [];
+  visible.forEach(ev => {
+    const startCol = ev._start <= weekStart ? 0 : week.findIndex(c => ymd(c.date) === ev._start);
+    const endCol = ev._end >= weekEnd ? 6 : week.findIndex(c => ymd(c.date) === ev._end);
+    if (startCol < 0 || endCol < 0) return;
+    let slotIdx = 0;
+    while (true) {
+      if (!slots[slotIdx]) { slots[slotIdx] = []; break; }
+      const conflict = slots[slotIdx].some(p => !(p.endCol < startCol || p.startCol > endCol));
+      if (!conflict) break;
+      slotIdx++;
+    }
+    slots[slotIdx].push({ startCol, endCol });
+    placed.push({ event: ev, slotIdx, startCol, endCol });
+  });
+  return placed;
+}
+
+function CalendarGrid({ cells, events, onCellClick, onEventClick, today }) {
   const todayStr = ymd(today);
   const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
+  const MAX_SLOTS = 4;
+  const BAR_HEIGHT = 22;
+  const HEADER_HEIGHT = 28;
+
+  // weeks로 분리
+  const weeks = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
 
   return (
     <div className="rounded-xl overflow-hidden border" style={{ borderColor: THEME.line }}>
       {/* 요일 헤더 */}
       <div className="grid grid-cols-7" style={{ background: THEME.navy }}>
-        {weekdays.map((w, i) => (
+        {weekdays.map((w) => (
           <div key={w} className="text-center py-2 text-xs font-bold text-white">{w}</div>
         ))}
       </div>
-      {/* 날짜 셀 */}
-      <div className="grid grid-cols-7" style={{ background: "#fff" }}>
-        {cells.map((cell, idx) => {
-          const dateStr = ymd(cell.date);
-          const events = eventsByDate[dateStr] || [];
-          const isToday = dateStr === todayStr;
-          const dow = cell.date.getDay();
-          const textColor = dow === 0 ? "#dc2626" : dow === 6 ? THEME.blue : THEME.ink;
-          return (
-            <div key={idx}
-                 onClick={() => onCellClick(cell.date)}
-                 className="border-b border-r p-2 cursor-pointer hover:bg-slate-50 transition"
-                 style={{
-                   minHeight: 130,
-                   borderColor: THEME.line2,
-                   background: cell.other ? "#fafbfc" : isToday ? THEME.accentSoft : "#fff",
-                   opacity: cell.other ? 0.45 : 1,
-                 }}>
-              <div className="flex items-center justify-between mb-1.5">
-                <span className={"text-sm " + (isToday ? "font-bold" : "")}
-                      style={{ color: textColor }}>
-                  {cell.date.getDate()}
-                </span>
-                {isToday && (
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded"
-                        style={{ background: THEME.accent, color: "#fff" }}>오늘</span>
-                )}
-              </div>
-              <div className="space-y-1">
-                {events.slice(0, 4).map((e, i) => {
-                  if (e.is_external) {
-                    return (
-                      <div key={i}
-                           onClick={(ev) => { ev.stopPropagation(); onEventClick(e); }}
-                           className="text-[11px] px-1.5 py-1 rounded truncate cursor-pointer hover:opacity-80"
-                           style={{
-                             background: "#f1f5f9",
-                             color: "#475569",
-                             borderLeft: "3px solid #94a3b8",
-                             fontStyle: "italic",
-                             fontWeight: 500,
-                           }}
-                           title={`MGEO 캘린더 원본: ${e.summary}\n${e.description || ""}`}>
-                        📅 {e.summary}
-                      </div>
-                    );
-                  }
-                  const c = getAuthorColor(e.author);
-                  const isTrip = e.leave_type_name === "출장";
-                  return (
-                    <div key={i}
-                         onClick={(ev) => { ev.stopPropagation(); onEventClick(e); }}
-                         className="text-[11px] px-1.5 py-1 rounded truncate cursor-pointer hover:opacity-80"
-                         style={{
-                           background: e.status === "approved" ? c.bg : c.soft,
-                           color: e.status === "approved" ? c.text : c.bg,
-                           borderLeft: isTrip ? `3px solid ${THEME.warn}` : "none",
-                           fontWeight: 600,
-                         }}
-                         title={`${e.author} · ${e.leave_type_name}${e.destination ? " · " + e.destination : ""} · ${statusKo(e.status)}`}>
-                      {isTrip && "✈ "}{e.author} · {e.leave_type_name}
-                    </div>
-                  );
-                })}
-                {events.length > 4 && (
-                  <div className="text-[10px]" style={{ color: THEME.sub }}>+{events.length - 4}건</div>
-                )}
-              </div>
+      {/* 주별 row */}
+      {weeks.map((week, wi) => {
+        const placed = layoutWeek(week, events);
+        const visible = placed.filter(p => p.slotIdx < MAX_SLOTS);
+        const overflowByCol = {};
+        placed.filter(p => p.slotIdx >= MAX_SLOTS).forEach(p => {
+          for (let c = p.startCol; c <= p.endCol; c++) {
+            overflowByCol[c] = (overflowByCol[c] || 0) + 1;
+          }
+        });
+
+        return (
+          <div key={wi} className="relative grid grid-cols-7 border-b"
+               style={{ borderColor: THEME.line, minHeight: 130 }}>
+            {/* 날짜 셀 (배경 + 일자 표시) */}
+            {week.map((cell, ci) => {
+              const dateStr = ymd(cell.date);
+              const isToday = dateStr === todayStr;
+              const dow = cell.date.getDay();
+              const textColor = dow === 0 ? "#dc2626" : dow === 6 ? THEME.blue : THEME.ink;
+              return (
+                <div key={ci}
+                     onClick={() => onCellClick(cell.date)}
+                     className="border-r cursor-pointer hover:bg-slate-50 transition"
+                     style={{
+                       borderColor: THEME.line2,
+                       background: cell.other ? "#fafbfc" : isToday ? THEME.accentSoft : "#fff",
+                       opacity: cell.other ? 0.45 : 1,
+                       padding: "6px 6px 0 6px",
+                     }}>
+                  <div className="flex items-center justify-between">
+                    <span className={"text-sm " + (isToday ? "font-bold" : "")}
+                          style={{ color: textColor }}>
+                      {cell.date.getDate()}
+                    </span>
+                    {isToday && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                            style={{ background: THEME.accent, color: "#fff" }}>오늘</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {/* 이벤트 막대 (absolute layer) */}
+            <div className="absolute inset-0 pointer-events-none"
+                 style={{ paddingTop: HEADER_HEIGHT, paddingLeft: 2, paddingRight: 2 }}>
+              {visible.map((p, i) => {
+                const ev = p.event;
+                const isExternal = ev.is_external;
+                const c = isExternal ? null : getAuthorColor(ev.author);
+                const isTrip = ev.leave_type_name === "출장";
+                const widthPct = ((p.endCol - p.startCol + 1) / 7) * 100;
+                const leftPct = (p.startCol / 7) * 100;
+                const topPx = p.slotIdx * BAR_HEIGHT;
+                const label = isExternal
+                  ? `📅 ${ev.summary}`
+                  : `${isTrip ? "✈ " : ""}${ev.author} · ${ev.leave_type_name}${ev.destination ? " · " + ev.destination : ""}`;
+                return (
+                  <div key={(ev.id || "x") + "-" + i + "-" + wi}
+                       onClick={(e) => { e.stopPropagation(); onEventClick(ev); }}
+                       className="absolute text-[11px] px-1.5 py-0.5 rounded truncate cursor-pointer hover:opacity-80 pointer-events-auto"
+                       style={{
+                         left: `calc(${leftPct}% + 2px)`,
+                         width: `calc(${widthPct}% - 4px)`,
+                         top: topPx,
+                         height: BAR_HEIGHT - 3,
+                         lineHeight: `${BAR_HEIGHT - 5}px`,
+                         background: isExternal ? "#f1f5f9" : (ev.status === "approved" ? c.bg : c.soft),
+                         color: isExternal ? "#475569" : (ev.status === "approved" ? c.text : c.bg),
+                         borderLeft: isTrip ? `3px solid ${THEME.warn}` : "none",
+                         fontStyle: isExternal ? "italic" : "normal",
+                         fontWeight: isExternal ? 500 : 600,
+                       }}
+                       title={isExternal
+                         ? `MGEO 캘린더 원본: ${ev.summary}\n${ev._start} ~ ${ev._end}\n${ev.description || ""}`
+                         : `${ev.author} · ${ev.leave_type_name}${ev.destination ? " · " + ev.destination : ""} · ${statusKo(ev.status)}`}>
+                    {label}
+                  </div>
+                );
+              })}
+              {/* +N건 표시 (MAX_SLOTS 초과) */}
+              {Object.entries(overflowByCol).map(([col, n]) => (
+                <div key={"of-" + col}
+                     className="absolute text-[10px] pointer-events-none"
+                     style={{
+                       left: `calc(${(Number(col) / 7) * 100}% + 4px)`,
+                       top: MAX_SLOTS * BAR_HEIGHT,
+                       color: THEME.sub,
+                     }}>
+                  +{n}건
+                </div>
+              ))}
             </div>
-          );
-        })}
-      </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
