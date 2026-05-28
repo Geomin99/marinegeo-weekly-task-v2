@@ -90,6 +90,41 @@ function isInRange(dateStr, startStr, endStr) {
   return d >= s && d <= e;
 }
 
+// 같은 제목 + 인접 날짜 이벤트들을 1개의 multi-day 이벤트로 합치기
+// (구글 캘린더가 같은 제목+연속 날짜를 시각적 막대로 합쳐 보이지만 실제로는 매일 별개 이벤트로 등록된 케이스 대응)
+function mergeContinuousEvents(events) {
+  // summary로 그룹핑, 각 그룹 내에서 start_date 순 정렬
+  const grouped = {};
+  for (const ev of events) {
+    const key = ev.summary || "";
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(ev);
+  }
+  const merged = [];
+  for (const key of Object.keys(grouped)) {
+    const list = grouped[key].slice().sort((a, b) =>
+      (a.start_date || "").localeCompare(b.start_date || "")
+    );
+    let current = null;
+    for (const ev of list) {
+      if (!current) {
+        current = { ...ev, _mergedIds: [ev.id] };
+        continue;
+      }
+      // Google all-day의 end_date는 exclusive: 이전 이벤트의 end_date == 현재 이벤트의 start_date 이면 인접
+      if (current.end_date === ev.start_date) {
+        current.end_date = ev.end_date;
+        current._mergedIds.push(ev.id);
+      } else {
+        merged.push(current);
+        current = { ...ev, _mergedIds: [ev.id] };
+      }
+    }
+    if (current) merged.push(current);
+  }
+  return merged;
+}
+
 // ─────────────────────────────────────────────────────────────
 // 메인: LeaveView
 // ─────────────────────────────────────────────────────────────
@@ -389,7 +424,7 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents }) {
       );
       const data = await r.json();
       if (data.error) throw new Error(data.error.message);
-      const events = (data.items || []).map(ev => {
+      const rawEvents = (data.items || []).map(ev => {
         // all-day: ev.start.date / 시간 지정: ev.start.dateTime
         const startStr = ev.start?.date || (ev.start?.dateTime || "").slice(0, 10);
         const endStr = ev.end?.date || (ev.end?.dateTime || "").slice(0, 10);
@@ -407,9 +442,12 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents }) {
           status: "external",
         };
       }).filter(Boolean);
+      // 같은 제목 + 인접 날짜 이벤트를 1개로 합치기
+      // (구글 캘린더가 같은 제목+연속 날짜를 시각적으로 합쳐 보여서 토뭉이님 데이터가 분리 등록된 경우 대응)
+      const events = mergeContinuousEvents(rawEvents);
       onExternalEvents?.(events);
       setPulledCount(events.length);
-      setMsg({ kind: "ok", text: `MGEO 연결됨 · ${events.length}건 표시` });
+      setMsg({ kind: "ok", text: `MGEO 연결됨 · ${rawEvents.length}건 → ${events.length}건 표시 (연속 합침)` });
     } catch (e) {
       setMsg({ kind: "err", text: `이벤트 조회 실패: ${e.message}` });
     }
