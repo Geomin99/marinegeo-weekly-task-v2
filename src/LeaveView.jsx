@@ -351,6 +351,7 @@ const GOOGLE_CLIENT_ID_FALLBACK = "897631356111-45ul0ohnrosarqd669d3vlj70gg7kq2i
 const GIS_SRC = "https://accounts.google.com/gsi/client";
 const CAL_SCOPE = "https://www.googleapis.com/auth/calendar";
 const TOKEN_STORAGE_KEY = "mgeo_gcal_token_v1";
+const CALENDAR_STORAGE_KEY = "mgeo_gcal_calendar_id_v1";
 
 function loadStoredToken() {
   try {
@@ -361,6 +362,29 @@ function loadStoredToken() {
     if (t.expires_at <= Date.now()) return null;
     return t;
   } catch { return null; }
+}
+
+function loadStoredCalendarId() {
+  try { return localStorage.getItem(CALENDAR_STORAGE_KEY) || null; }
+  catch { return null; }
+}
+
+async function tryDeleteCalendarEvent(eventId) {
+  if (!eventId) return { ok: false, reason: "no_event_id" };
+  const token = loadStoredToken();
+  if (!token) return { ok: false, reason: "no_token" };
+  const calId = loadStoredCalendarId();
+  if (!calId) return { ok: false, reason: "no_calendar" };
+  try {
+    const r = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(eventId)}`,
+      { method: "DELETE", headers: { Authorization: `Bearer ${token.access_token}` } }
+    );
+    if (r.ok || r.status === 410) return { ok: true };
+    return { ok: false, reason: `status_${r.status}` };
+  } catch (e) {
+    return { ok: false, reason: e.message };
+  }
 }
 
 function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents }) {
@@ -439,6 +463,7 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents }) {
           return;
         }
         setCalendarId(mgeo.id);
+        try { localStorage.setItem(CALENDAR_STORAGE_KEY, mgeo.id); } catch {}
         setMsg({ kind: "ok", text: "MGEO 연결됨 — 일정 가져오는 중..." });
         await pullEvents(mgeo.id, token.access_token);
       } catch (e) {
@@ -995,6 +1020,9 @@ function LeaveRequestModal({ init, leaveTypes, authors, onClose, onSaved }) {
     if (!isEdit) return;
     if (!confirm("정말 이 신청을 삭제하시겠습니까?")) return;
     setSaving(true);
+    if (existing?.google_calendar_event_id) {
+      await tryDeleteCalendarEvent(existing.google_calendar_event_id);
+    }
     const { error } = await supabase.from("leave_requests").delete().eq("id", existing.id);
     setSaving(false);
     if (error) { alert("삭제 실패: " + error.message); return; }
