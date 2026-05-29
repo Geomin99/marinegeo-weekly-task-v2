@@ -78,6 +78,73 @@ function daysBetween(start, end) {
   return Math.max(1, Math.round((e - s) / (1000 * 60 * 60 * 24)) + 1);
 }
 
+function addDays(dateStr, n) {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + n);
+  return ymd(d);
+}
+
+// 출장 기간 내 휴일(토·일·공휴일·대체공휴일) 일수 계산
+// holidaysSet은 YYYY-MM-DD 형식 Set
+function countHolidaysInRange(startDate, endDate, holidaysSet) {
+  if (!startDate) return 0;
+  const start = new Date(startDate);
+  const end = new Date(endDate || startDate);
+  let count = 0;
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const day = d.getDay();
+    const dStr = ymd(d);
+    if (day === 0 || day === 6 || holidaysSet.has(dStr)) count++;
+  }
+  return count;
+}
+
+// 출장 자동 보상휴가 적용 대상 직원
+const COMPENSATORY_TARGETS = new Set(["김찬수", "최승표"]);
+
+// 출장 leave_request에 연결된 보상휴가 자동 생성·갱신·삭제
+// trip: 방금 저장된 출장 row (id 필요)
+// holidaysSet: YYYY-MM-DD 공휴일 Set
+// leaveTypes: leave_types 전체 목록
+async function applyCompensatoryLeave(trip, holidaysSet, leaveTypes) {
+  if (!trip?.id) return;
+  const N = countHolidaysInRange(trip.start_date, trip.end_date, holidaysSet);
+  const compType = leaveTypes.find(t => t.name === "보상휴가");
+
+  const { data: existing } = await supabase
+    .from("leave_requests")
+    .select("id")
+    .eq("compensatory_for_id", trip.id)
+    .maybeSingle();
+
+  if (N > 0 && compType) {
+    const payload = {
+      author: trip.author,
+      leave_type_id: compType.id,
+      leave_type_name: "보상휴가",
+      start_date: addDays(trip.end_date || trip.start_date, 1),
+      end_date: null,
+      is_all_day: true,
+      start_time: null,
+      end_time: null,
+      total_absence_days: 0,
+      annual_consumed: -N,
+      status: "approved",
+      approver: trip.approver || null,
+      memo: `[자동 생성] 출장 ${trip.destination || "(미지정)"} ${trip.start_date}~${trip.end_date || trip.start_date} 휴일 ${N}일 보상`,
+      compensatory_for_id: trip.id,
+      updated_at: new Date().toISOString(),
+    };
+    if (existing) {
+      await supabase.from("leave_requests").update(payload).eq("id", existing.id);
+    } else {
+      await supabase.from("leave_requests").insert([payload]);
+    }
+  } else if (existing) {
+    await supabase.from("leave_requests").delete().eq("id", existing.id);
+  }
+}
+
 function getMonthGrid(year, month) {
   // month: 0~11
   const first = new Date(year, month, 1);
@@ -156,6 +223,7 @@ export default function LeaveView() {
   const [balances, setBalances] = useState([]);
   const [loading, setLoading] = useState(true);
   const [externalEvents, setExternalEvents] = useState([]);  // MGEO 캘린더 원본 이벤트 (읽기 표시용)
+  const [holidays, setHolidays] = useState(() => new Set());  // 대한민국 공휴일·대체공휴일 (YYYY-MM-DD)
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalInit, setModalInit] = useState(null);  // {date} or {request}
@@ -266,7 +334,8 @@ export default function LeaveView() {
         <div className="flex items-center gap-2">
           <GoogleCalendarSync requests={requests}
                               onSyncDone={reloadAll}
-                              onExternalEvents={setExternalEvents} />
+                              onExternalEvents={setExternalEvents}
+                              onHolidaysFetched={setHolidays} />
           <button onClick={() => openNew(new Date())}
                   className="px-4 py-2 text-sm font-semibold rounded-md flex items-center gap-1.5 shadow-md hover:shadow-lg transition"
                   style={{ background: THEME.navy, color: "#fff" }}>
@@ -334,6 +403,7 @@ export default function LeaveView() {
           init={modalInit}
           leaveTypes={leaveTypes}
           authors={balances.map(b => b.author)}
+          holidays={holidays}
           onClose={() => setModalOpen(false)}
           onSaved={() => { setModalOpen(false); reloadAll(); }}
           onExternalDeleted={(ids) => setExternalEvents(prev =>
@@ -390,7 +460,7 @@ async function tryDeleteCalendarEvent(eventId) {
   }
 }
 
-function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents }) {
+function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents, onHolidaysFetched }) {
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID_FALLBACK;
   const [gisReady, setGisReady] = useState(false);
   const [token, setToken] = useState(() => loadStoredToken());  // 페이지 로드 시 localStorage에서 복원
@@ -468,7 +538,10 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents }) {
         setCalendarId(mgeo.id);
         try { localStorage.setItem(CALENDAR_STORAGE_KEY, mgeo.id); } catch {}
         setMsg({ kind: "ok", text: "MGEO 연결됨 — 일정 가져오는 중..." });
-        await pullEvents(mgeo.id, token.access_token);
+        await Promise.all([
+          pullEvents(mgeo.id, token.access_token),
+          pullHolidays(token.access_token),
+        ]);
       } catch (e) {
         setMsg({ kind: "err", text: `캘린더 조회 실패: ${e.message}` });
       } finally {
@@ -476,6 +549,41 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents }) {
       }
     })();
   }, [token]);
+
+  // 대한민국 공휴일·대체공휴일 가져오기 (현재 기준 ±12개월)
+  async function pullHolidays(accessToken) {
+    try {
+      const calId = "ko.south_korea#holiday@group.v.calendar.google.com";
+      const now = new Date();
+      const timeMin = new Date(now.getFullYear() - 1, 0, 1).toISOString();
+      const timeMax = new Date(now.getFullYear() + 1, 11, 31).toISOString();
+      const params = new URLSearchParams({
+        timeMin, timeMax,
+        singleEvents: "true",
+        maxResults: "500",
+      });
+      const r = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events?${params}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      const data = await r.json();
+      if (data.error) return;  // 휴일 fetch 실패는 silent (토·일은 여전히 인식)
+      const set = new Set();
+      for (const ev of (data.items || [])) {
+        // 종일 이벤트만 (date), 다일 이벤트는 start~end 사이 모두 포함
+        if (!ev.start?.date) continue;
+        const start = new Date(ev.start.date);
+        const end = ev.end?.date ? new Date(ev.end.date) : new Date(ev.start.date);
+        // Google all-day end는 exclusive
+        for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
+          set.add(ymd(d));
+        }
+      }
+      onHolidaysFetched?.(set);
+    } catch (e) {
+      // silent
+    }
+  }
 
   // MGEO 캘린더 이벤트 가져오기 (현재 기준 ±12개월)
   async function pullEvents(calId, accessToken) {
@@ -919,7 +1027,7 @@ function RecentRequestList({ requests, onEdit }) {
 // ─────────────────────────────────────────────────────────────
 // 신청·수정 모달
 // ─────────────────────────────────────────────────────────────
-function LeaveRequestModal({ init, leaveTypes, authors, onClose, onSaved, onExternalDeleted }) {
+function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSaved, onExternalDeleted }) {
   const isEdit = !!init?.request;
   const existing = init?.request;
   const ext = init?.externalEvent;  // 외부 MGEO 이벤트 → 변환 모드
@@ -972,6 +1080,12 @@ function LeaveRequestModal({ init, leaveTypes, authors, onClose, onSaved, onExte
   }, [selectedType, existing]);
 
   const days = useMemo(() => daysBetween(startDate, endDate), [startDate, endDate]);
+  const holidayInRange = useMemo(
+    () => countHolidaysInRange(startDate, endDate, holidays || new Set()),
+    [startDate, endDate, holidays]
+  );
+  const showCompensatoryNotice =
+    isTrip && COMPENSATORY_TARGETS.has((author || "").trim()) && holidayInRange > 0;
   const annualConsumed = useMemo(
     () => (selectedType?.annual_consumption || 0) * days,
     [selectedType, days]
@@ -1008,14 +1122,23 @@ function LeaveRequestModal({ init, leaveTypes, authors, onClose, onSaved, onExte
       updated_at: new Date().toISOString(),
     };
 
-    let error;
+    let savedRow, error;
     if (isEdit) {
-      ({ error } = await supabase.from("leave_requests").update(payload).eq("id", existing.id));
+      const r = await supabase.from("leave_requests").update(payload).eq("id", existing.id).select().single();
+      savedRow = r.data; error = r.error;
     } else {
-      ({ error } = await supabase.from("leave_requests").insert([payload]));
+      const r = await supabase.from("leave_requests").insert([payload]).select().single();
+      savedRow = r.data; error = r.error;
     }
+    if (error) { setSaving(false); alert("저장 실패: " + error.message); return; }
+
+    // 출장 + 김찬수·최승표면 보상휴가 자동 처리
+    if (savedRow && selectedType?.name === "출장" && COMPENSATORY_TARGETS.has(savedRow.author)) {
+      try { await applyCompensatoryLeave(savedRow, holidays || new Set(), leaveTypes); }
+      catch (e) { console.warn("보상휴가 자동 처리 실패:", e); }
+    }
+
     setSaving(false);
-    if (error) { alert("저장 실패: " + error.message); return; }
     onSaved();
   }
 
@@ -1197,6 +1320,18 @@ function LeaveRequestModal({ init, leaveTypes, authors, onClose, onSaved, onExte
                       className="col-span-2 px-3 py-2 border rounded-md outline-none resize-none"
                       style={{ borderColor: THEME.line }} />
           </div>
+
+          {/* 출장 보상휴가 자동 생성 안내 */}
+          {showCompensatoryNotice && (
+            <div className="rounded-md p-3 text-xs"
+                 style={{ background: "#e7f5ec", border: "1px solid #86c79a", color: "#1a5d2e" }}>
+              <div className="font-bold mb-1">🎁 보상휴가 자동 생성</div>
+              <div>
+                출장 기간에 휴일(토·일·공휴일·대체공휴일) <b>{holidayInRange}일</b>이 포함되어,
+                저장 시 <b>보상휴가 {holidayInRange}일</b>이 자동 생성되어 잔여 연차에 반영됩니다.
+              </div>
+            </div>
+          )}
 
           {/* 요약 */}
           <div className="rounded-md p-3 text-xs" style={{ background: THEME.accentSoft }}>
