@@ -102,46 +102,44 @@ function countHolidaysInRange(startDate, endDate, holidaysSet) {
 // 출장 자동 보상휴가 적용 대상 직원
 const COMPENSATORY_TARGETS = new Set(["김찬수", "최승표"]);
 
-// 출장 leave_request에 연결된 보상휴가 자동 생성·갱신·삭제
-// trip: 방금 저장된 출장 row (id 필요)
-// holidaysSet: YYYY-MM-DD 공휴일 Set
-// leaveTypes: leave_types 전체 목록
-async function applyCompensatoryLeave(trip, holidaysSet, leaveTypes) {
-  if (!trip?.id) return;
-  const N = countHolidaysInRange(trip.start_date, trip.end_date, holidaysSet);
-  const compType = leaveTypes.find(t => t.name === "보상휴가");
+// 보상휴가 누적 재계산 (직원·연도 단위)
+// 해당 직원·연도의 모든 출장(취소·반려 제외)에 대해 휴일 일수 합산 →
+// annual_leave_balances.compensatory_grant에 저장. 별도 leave_request 생성 X.
+// 직원은 향후 휴가를 자유롭게 신청해 이 누적분을 사용한다.
+async function recalculateCompensatoryGrant(author, year, holidaysSet) {
+  if (!author || !year) return;
+  if (!COMPENSATORY_TARGETS.has(author)) return;
+
+  const { data: trips } = await supabase
+    .from("leave_requests")
+    .select("start_date, end_date, status")
+    .eq("author", author)
+    .eq("leave_type_name", "출장")
+    .gte("start_date", `${year}-01-01`)
+    .lte("start_date", `${year}-12-31`);
+
+  let total = 0;
+  for (const t of (trips || [])) {
+    if (t.status === "rejected" || t.status === "cancelled") continue;
+    total += countHolidaysInRange(t.start_date, t.end_date, holidaysSet);
+  }
 
   const { data: existing } = await supabase
-    .from("leave_requests")
+    .from("annual_leave_balances")
     .select("id")
-    .eq("compensatory_for_id", trip.id)
+    .eq("author", author)
+    .eq("year", year)
     .maybeSingle();
 
-  if (N > 0 && compType) {
-    const payload = {
-      author: trip.author,
-      leave_type_id: compType.id,
-      leave_type_name: "보상휴가",
-      start_date: addDays(trip.end_date || trip.start_date, 1),
-      end_date: null,
-      is_all_day: true,
-      start_time: null,
-      end_time: null,
-      total_absence_days: 0,
-      annual_consumed: -N,
-      status: "approved",
-      approver: trip.approver || null,
-      memo: `[자동 생성] 출장 ${trip.destination || "(미지정)"} ${trip.start_date}~${trip.end_date || trip.start_date} 휴일 ${N}일 보상`,
-      compensatory_for_id: trip.id,
-      updated_at: new Date().toISOString(),
-    };
-    if (existing) {
-      await supabase.from("leave_requests").update(payload).eq("id", existing.id);
-    } else {
-      await supabase.from("leave_requests").insert([payload]);
-    }
-  } else if (existing) {
-    await supabase.from("leave_requests").delete().eq("id", existing.id);
+  if (existing) {
+    await supabase
+      .from("annual_leave_balances")
+      .update({ compensatory_grant: total, updated_at: new Date().toISOString() })
+      .eq("id", existing.id);
+  } else {
+    await supabase.from("annual_leave_balances").insert([{
+      author, year, annual_grant: 0, annual_additional: 0, compensatory_grant: total,
+    }]);
   }
 }
 
@@ -279,7 +277,7 @@ export default function LeaveView() {
       });
     return balances.map(b => {
       const used = usedBy[`${b.author}|${b.year}`] || 0;
-      const grant = Number(b.annual_grant) + Number(b.annual_additional || 0);
+      const grant = Number(b.annual_grant) + Number(b.annual_additional || 0) + Number(b.compensatory_grant || 0);
       return { ...b, used, remaining: grant - used, grant };
     });
   }, [balances, requests]);
@@ -1132,10 +1130,12 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
     }
     if (error) { setSaving(false); alert("저장 실패: " + error.message); return; }
 
-    // 출장 + 김찬수·최승표면 보상휴가 자동 처리
+    // 출장 + 김찬수·최승표면 보상 누적 재계산 (잔여 연차에 +N 누적)
     if (savedRow && selectedType?.name === "출장" && COMPENSATORY_TARGETS.has(savedRow.author)) {
-      try { await applyCompensatoryLeave(savedRow, holidays || new Set(), leaveTypes); }
-      catch (e) { console.warn("보상휴가 자동 처리 실패:", e); }
+      try {
+        const year = new Date(savedRow.start_date).getFullYear();
+        await recalculateCompensatoryGrant(savedRow.author, year, holidays || new Set());
+      } catch (e) { console.warn("보상 누적 재계산 실패:", e); }
     }
 
     setSaving(false);
@@ -1149,7 +1149,14 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
     if (existing?.google_calendar_event_id) {
       await tryDeleteCalendarEvent(existing.google_calendar_event_id);
     }
+    const wasTrip = existing?.leave_type_name === "출장";
+    const wasAuthor = existing?.author;
+    const wasYear = existing?.start_date ? new Date(existing.start_date).getFullYear() : null;
     const { error } = await supabase.from("leave_requests").delete().eq("id", existing.id);
+    if (!error && wasTrip && wasAuthor && wasYear && COMPENSATORY_TARGETS.has(wasAuthor)) {
+      try { await recalculateCompensatoryGrant(wasAuthor, wasYear, holidays || new Set()); }
+      catch (e) { console.warn("보상 누적 재계산 실패:", e); }
+    }
     setSaving(false);
     if (error) { alert("삭제 실패: " + error.message); return; }
     onSaved();
@@ -1321,14 +1328,15 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
                       style={{ borderColor: THEME.line }} />
           </div>
 
-          {/* 출장 보상휴가 자동 생성 안내 */}
+          {/* 출장 잔여 연차 보상 안내 */}
           {showCompensatoryNotice && (
             <div className="rounded-md p-3 text-xs"
                  style={{ background: "#e7f5ec", border: "1px solid #86c79a", color: "#1a5d2e" }}>
-              <div className="font-bold mb-1">🎁 보상휴가 자동 생성</div>
+              <div className="font-bold mb-1">🎁 잔여 연차 보상</div>
               <div>
                 출장 기간에 휴일(토·일·공휴일·대체공휴일) <b>{holidayInRange}일</b>이 포함되어,
-                저장 시 <b>보상휴가 {holidayInRange}일</b>이 자동 생성되어 잔여 연차에 반영됩니다.
+                저장 시 <b>잔여 연차에 +{holidayInRange}일</b>이 누적됩니다.
+                별도 일정으로 등록되지 않으며, 직원이 향후 휴가를 신청해 사용합니다.
               </div>
             </div>
           )}
