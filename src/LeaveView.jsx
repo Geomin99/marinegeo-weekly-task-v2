@@ -336,6 +336,9 @@ export default function LeaveView() {
           authors={balances.map(b => b.author)}
           onClose={() => setModalOpen(false)}
           onSaved={() => { setModalOpen(false); reloadAll(); }}
+          onExternalDeleted={(ids) => setExternalEvents(prev =>
+            prev.filter(e => !ids.includes(e.id))
+          )}
         />
       )}
     </div>
@@ -916,7 +919,7 @@ function RecentRequestList({ requests, onEdit }) {
 // ─────────────────────────────────────────────────────────────
 // 신청·수정 모달
 // ─────────────────────────────────────────────────────────────
-function LeaveRequestModal({ init, leaveTypes, authors, onClose, onSaved }) {
+function LeaveRequestModal({ init, leaveTypes, authors, onClose, onSaved, onExternalDeleted }) {
   const isEdit = !!init?.request;
   const existing = init?.request;
   const ext = init?.externalEvent;  // 외부 MGEO 이벤트 → 변환 모드
@@ -1027,6 +1030,27 @@ function LeaveRequestModal({ init, leaveTypes, authors, onClose, onSaved }) {
     setSaving(false);
     if (error) { alert("삭제 실패: " + error.message); return; }
     onSaved();
+  }
+
+  async function handleDeleteExternal() {
+    if (!ext) return;
+    const ids = (ext._mergedIds && ext._mergedIds.length) ? ext._mergedIds : [ext.id];
+    const msg = ids.length > 1
+      ? `이 일정은 ${ids.length}개의 캘린더 이벤트로 구성되어 있습니다.\n모두 MGEO 캘린더에서 영구 삭제됩니다. 계속하시겠습니까?`
+      : `이 이벤트를 MGEO 캘린더에서 영구 삭제합니다. 계속하시겠습니까?`;
+    if (!confirm(msg)) return;
+    setSaving(true);
+    const okIds = [], failIds = [];
+    for (const id of ids) {
+      const r = await tryDeleteCalendarEvent(id);
+      if (r.ok) okIds.push(id); else failIds.push(id);
+    }
+    setSaving(false);
+    if (failIds.length) {
+      alert(`삭제 실패 ${failIds.length}건. 토큰 만료 또는 권한 부족일 수 있습니다.\n(성공: ${okIds.length}건)`);
+    }
+    if (okIds.length) onExternalDeleted?.(okIds);
+    onClose();
   }
 
   return (
@@ -1201,6 +1225,12 @@ function LeaveRequestModal({ init, leaveTypes, authors, onClose, onSaved }) {
                     className="flex items-center gap-1 text-xs font-semibold hover:underline"
                     style={{ color: "#dc2626" }}>
               <Trash2 size={13} /> 삭제
+            </button>
+          ) : ext ? (
+            <button onClick={handleDeleteExternal} disabled={saving}
+                    className="flex items-center gap-1 text-xs font-semibold hover:underline"
+                    style={{ color: "#dc2626" }}>
+              <Trash2 size={13} /> MGEO 캘린더에서 삭제
             </button>
           ) : <span />}
           <div className="flex gap-2">
