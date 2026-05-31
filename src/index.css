@@ -1063,6 +1063,17 @@ button:disabled {
   .center-kpis { grid-template-columns: 1fr; }
 }
 
+/* 완료 처리 모달 */
+.center-complete { width: min(420px, 100%); padding: 0; }
+.center-complete-body { padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
+.cc-title { margin: 0; font-weight: 800; color: #1f3a5f; font-size: 14.5px; line-height: 1.4; }
+.cc-field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 700; color: #45556c; }
+.cc-field input { border: 1px solid #d9e3ee; border-radius: 8px; padding: 9px 11px; font-size: 14px; font-family: inherit; color: #142033; }
+.cc-check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #34425a; font-weight: 600; }
+.cc-check input { width: 16px; height: 16px; }
+.cc-note { margin: 0; font-size: 12.5px; color: #0f766e; background: #e9faf5; padding: 8px 10px; border-radius: 8px; }
+.cc-warn { margin: 0; font-size: 12px; color: #8a5200; background: #fff6e3; padding: 8px 10px; border-radius: 8px; line-height: 1.5; }
+
 .center-task-list {
   display: flex;
   flex-direction: column;

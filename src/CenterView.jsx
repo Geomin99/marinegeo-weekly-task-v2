@@ -20,6 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
+import { gcalReady, createAllDayEvent } from "./gcal";
 
 // ── 표준 분류·상태·우선순위 (포테토뭉 합의 6/5/3종) ──
 const CATEGORIES = ["공공요금", "제출업무", "지원사업", "교육·시설", "입주·계약"];
@@ -117,6 +118,10 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
   const [saving, setSaving] = useState(false);
   const [confirmTask, setConfirmTask] = useState(null);
   const [showDone, setShowDone] = useState(false);
+  const [completeTarget, setCompleteTarget] = useState(null);
+  const [completeDate, setCompleteDate] = useState("");
+  const [addCal, setAddCal] = useState(false);
+  const [completing, setCompleting] = useState(false);
 
   const notify = useCallback((m, t = "info") => onNotice?.(m, t), [onNotice]);
   const reload = useCallback(() => onReload?.(), [onReload]);
@@ -230,8 +235,55 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
     notify(status === "제출완료" ? "완료 처리했습니다." : "진행 상태로 되돌렸습니다.", "success");
     reload();
   }
-  const markDone = (row) => setStatus(row, "제출완료", true);
   const markUndone = (row) => setStatus(row, "확인필요", false);
+
+  function todayYmd() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  function openComplete(row) {
+    setCompleteTarget(row);
+    setCompleteDate(todayYmd());
+    setAddCal(false);
+    setCompleting(false);
+  }
+  async function doComplete(withCalendar) {
+    const row = completeTarget;
+    if (!row) return;
+    setCompleting(true);
+    const completedIso = new Date(completeDate + "T00:00:00").toISOString();
+    const patch = {
+      status: "제출완료",
+      submitted: true,
+      submitted_at: row.submitted_at || new Date().toISOString(),
+      completed_at: completedIso,
+    };
+    let calNote = "";
+    // 헌법: 자동 생성 금지 — withCalendar(사용자 명시 동의)일 때만, 그리고 중복 방지
+    if (withCalendar && !row.google_calendar_event_id) {
+      const res = await createAllDayEvent({
+        summary: `[센터완료] ${row.title}`,
+        description: `해양벤처진흥센터 업무 완료 기록\n분류: ${row.category}${row.assignee ? ` · 담당: ${row.assignee}` : ""}`,
+        date: completeDate,
+      });
+      if (res.ok) {
+        patch.google_calendar_event_id = res.eventId;
+        patch.calendar_created_at = new Date().toISOString();
+        calNote = " · 캘린더 추가됨";
+      } else if (res.reason === "no_token" || res.reason === "no_calendar") {
+        calNote = " · 캘린더 미연동(휴가·출장 탭에서 구글 연동 먼저)";
+      } else {
+        calNote = ` · 캘린더 실패(${res.reason})`;
+      }
+    }
+    const { error } = await supabase.from("center_tasks").update(patch).eq("id", row.id);
+    setCompleting(false);
+    setCompleteTarget(null);
+    if (error) { notify(`완료 처리 실패: ${error.message}`, "error"); return; }
+    const failed = calNote.includes("실패") || calNote.includes("미연동");
+    notify(`완료 처리했습니다${calNote}.`, failed ? "info" : "success");
+    reload();
+  }
 
   async function copyPath(path) {
     if (!path) return;
@@ -279,7 +331,7 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
           {done ? (
             <button className="icon-btn" title="진행으로 되돌리기" onClick={() => markUndone(t)}><RotateCcw size={15} /></button>
           ) : (
-            <button className="icon-btn done" title="완료 처리" onClick={() => markDone(t)}><CheckCircle2 size={16} /></button>
+            <button className="icon-btn done" title="완료 처리" onClick={() => openComplete(t)}><CheckCircle2 size={16} /></button>
           )}
           {t.w_path && (
             <button className="icon-btn" title="W드라이브 경로 복사" onClick={() => copyPath(t.w_path)}>
@@ -489,6 +541,45 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
             <div className="confirm-actions">
               <button className="btn btn-ghost" onClick={() => setConfirmTask(null)}>취소</button>
               <button className="btn btn-danger" onClick={doSoftDelete}>삭제</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 완료 처리 모달 (완료일 선택 + 구글캘린더 opt-in) */}
+      {completeTarget && (
+        <div className="modal-backdrop" role="presentation" onClick={() => !completing && setCompleteTarget(null)}>
+          <div className="center-complete panel" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className="center-modal-head">
+              <h3>완료 처리</h3>
+              <button className="icon-btn" onClick={() => !completing && setCompleteTarget(null)} aria-label="닫기"><X size={16} /></button>
+            </div>
+            <div className="center-complete-body">
+              <p className="cc-title">{completeTarget.title}</p>
+              <label className="cc-field">
+                <span>완료일</span>
+                <input type="date" value={completeDate} onChange={(e) => setCompleteDate(e.target.value)} />
+              </label>
+              {completeTarget.google_calendar_event_id ? (
+                <p className="cc-note">이미 구글 캘린더에 추가된 업무입니다.</p>
+              ) : (
+                <>
+                  <label className="cc-check">
+                    <input type="checkbox" checked={addCal} onChange={(e) => setAddCal(e.target.checked)} />
+                    <span>구글 캘린더(MGEO)에 완료일 추가</span>
+                  </label>
+                  {addCal && !gcalReady() && (
+                    <p className="cc-warn">구글 캘린더 미연동 — 「휴가·출장」 탭에서 구글 연동을 먼저 해야 추가됩니다. (연동 안 돼도 완료 처리는 됩니다)</p>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="center-modal-actions">
+              <button className="btn btn-ghost" onClick={() => setCompleteTarget(null)} disabled={completing}>취소</button>
+              <button className="btn btn-primary" onClick={() => doComplete(addCal && !completeTarget.google_calendar_event_id)} disabled={completing}>
+                {completing ? <Loader2 size={15} className="spin" /> : <CheckCircle2 size={15} />}
+                {addCal && !completeTarget.google_calendar_event_id ? " 완료 + 캘린더 추가" : " 완료만 처리"}
+              </button>
             </div>
           </div>
         </div>
