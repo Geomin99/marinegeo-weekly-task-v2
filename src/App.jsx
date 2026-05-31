@@ -1,30 +1,70 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from "react";
-import { Search, Plus, Calendar, Users, ChevronDown, ChevronRight, X, Filter, RefreshCw, Loader2, Trash2, AlertCircle, ChevronLeft, Save, Check, Plane } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  AlertCircle,
+  Archive,
+  BriefcaseBusiness,
+  CalendarDays,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  CircleDot,
+  Clock3,
+  FileText,
+  Filter,
+  LayoutDashboard,
+  Loader2,
+  LogOut,
+  Plane,
+  Plus,
+  RefreshCw,
+  Save,
+  Search,
+  Trash2,
+  Users,
+  X,
+} from "lucide-react";
 import { supabase } from "./supabaseClient";
 import LeaveView from "./LeaveView.jsx";
+import CenterView from "./CenterView.jsx";
 
-// ===== 작성자 아바타 색상 =====
+const BRAND = {
+  navy: "#1f3a5f",
+  blue: "#245f9a",
+  accent: "#0b7cc1",
+  mint: "#14b8a6",
+  ink: "#142033",
+  muted: "#637083",
+  line: "#d9e3ee",
+  soft: "#f4f7fb",
+};
+
 const AVATAR_COLORS = [
-  { bg: "#dbeafe", text: "#1e40af" },
-  { bg: "#ddd6fe", text: "#6d28d9" },
-  { bg: "#fce7f3", text: "#be185d" },
-  { bg: "#fef3c7", text: "#92400e" },
-  { bg: "#d1fae5", text: "#065f46" },
-  { bg: "#cffafe", text: "#155e75" },
-  { bg: "#fee2e2", text: "#991b1b" },
-  { bg: "#e0e7ff", text: "#3730a3" },
+  { bg: "#e8f2ff", text: "#1f3a5f" },
+  { bg: "#e7f7f3", text: "#0f766e" },
+  { bg: "#fff3dc", text: "#9a5b00" },
+  { bg: "#f0edff", text: "#5b3cb5" },
+  { bg: "#ffe8ec", text: "#b4234b" },
+  { bg: "#e9eef6", text: "#31445f" },
 ];
 
-function getAvatarColor(name) {
-  if (!name) return AVATAR_COLORS[0];
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+const NAV_ITEMS = [
+  { id: "dashboard", label: "대시보드", icon: LayoutDashboard },
+  { id: "journal", label: "주간업무", icon: FileText },
+  { id: "center", label: "해양벤처진흥센터", icon: BriefcaseBusiness },
+  { id: "leave", label: "휴가·출장", icon: Plane },
+];
+
+function formatYMD(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
-function getTodayKorean() {
+function todayLabel() {
   const d = new Date();
-  return d.getFullYear() + "년 " + (d.getMonth() + 1) + "월 " + d.getDate() + "일";
+  return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
 }
 
 function getMondayOfThisWeek() {
@@ -37,8 +77,21 @@ function getMondayOfThisWeek() {
 }
 
 function getMondayDateStr() {
-  const d = getMondayOfThisWeek();
-  return d.toISOString().split("T")[0];
+  return formatYMD(getMondayOfThisWeek());
+}
+
+function getNextMonday(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00`);
+  d.setDate(d.getDate() + 7);
+  return formatYMD(d);
+}
+
+function getWeekInfo(dateStr) {
+  if (!dateStr) return "";
+  const d = new Date(`${dateStr}T00:00:00`);
+  const firstDay = new Date(d.getFullYear(), d.getMonth(), 1);
+  const week = Math.ceil((d.getDate() + firstDay.getDay()) / 7);
+  return `${d.getMonth() + 1}월 ${week}주차`;
 }
 
 function isThisWeek(dateStr) {
@@ -47,58 +100,63 @@ function isThisWeek(dateStr) {
   const sunday = new Date(monday);
   sunday.setDate(sunday.getDate() + 6);
   sunday.setHours(23, 59, 59, 999);
-  const target = new Date(dateStr);
+  const target = new Date(`${dateStr}T00:00:00`);
   return target >= monday && target <= sunday;
 }
 
-function getWeekInfo(dateStr) {
-  if (!dateStr) return "";
-  const d = new Date(dateStr);
-  const month = d.getMonth() + 1;
-  const firstDay = new Date(d.getFullYear(), d.getMonth(), 1);
-  const week = Math.ceil((d.getDate() + firstDay.getDay()) / 7);
-  return month + "월 " + week + "주차";
+function avatarFor(name) {
+  if (!name) return AVATAR_COLORS[0];
+  let hash = 0;
+  for (let i = 0; i < name.length; i += 1) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
-function getNextMonday(dateStr) {
-  if (!dateStr) return "";
-  const d = new Date(dateStr);
-  d.setDate(d.getDate() + 7);
-  return d.toISOString().split("T")[0];
+function Toast({ notice, onClose }) {
+  if (!notice) return null;
+  return (
+    <div className={`toast toast-${notice.type || "info"}`}>
+      <span>{notice.message}</span>
+      <button onClick={onClose} aria-label="알림 닫기">
+        <X size={14} />
+      </button>
+    </div>
+  );
 }
 
-// ===== 자동 높이 조절 textarea (엑셀 스타일) =====
-function AutoResizeTextarea({ value, onChange, placeholder, className, minRows = 30 }) {
+function ConfirmDialog({ confirm, onCancel, onConfirm }) {
+  if (!confirm) return null;
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onCancel}>
+      <div className="confirm-dialog" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <div className="confirm-icon">
+          <AlertCircle size={20} />
+        </div>
+        <div>
+          <h3>{confirm.title}</h3>
+          <p>{confirm.message}</p>
+        </div>
+        <div className="confirm-actions">
+          <button className="btn btn-ghost" onClick={onCancel}>취소</button>
+          <button className="btn btn-danger" onClick={onConfirm}>삭제</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AutoResizeTextarea({ value, onChange, placeholder, className, minRows = 10 }) {
   const textareaRef = useRef(null);
 
-  // 높이 자동 조절 함수
-  const adjustHeight = () => {
+  useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
-    // 일단 높이를 auto로 만들어 scrollHeight 측정 가능하게
     el.style.height = "auto";
-    // 한 줄 높이 계산 (line-height 기반)
     const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 22;
-    // 패딩 고려한 최소 높이
-    const paddingTop = parseFloat(getComputedStyle(el).paddingTop) || 0;
-    const paddingBottom = parseFloat(getComputedStyle(el).paddingBottom) || 0;
-    const minHeight = lineHeight * minRows + paddingTop + paddingBottom;
-    // 실제 컨텐츠 높이와 최소 높이 중 큰 값으로 설정
-    const newHeight = Math.max(minHeight, el.scrollHeight);
-    el.style.height = newHeight + "px";
-  };
-
-  // value 바뀔 때마다 높이 재계산
-  useEffect(() => {
-    adjustHeight();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
-
-  // 컴포넌트 마운트 후 첫 높이 조절
-  useEffect(() => {
-    adjustHeight();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const minHeight = lineHeight * minRows + 28;
+    el.style.height = `${Math.max(minHeight, el.scrollHeight)}px`;
+  }, [value, minRows]);
 
   return (
     <textarea
@@ -112,76 +170,67 @@ function AutoResizeTextarea({ value, onChange, placeholder, className, minRows =
   );
 }
 
-// ===== 달력 =====
 function MiniCalendar() {
   const today = new Date();
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
-
   const firstDay = new Date(viewYear, viewMonth, 1);
-  const lastDay = new Date(viewYear, viewMonth + 1, 0);
-  const startDay = firstDay.getDay();
-  const daysInMonth = lastDay.getDate();
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
   const prevMonthLastDay = new Date(viewYear, viewMonth, 0).getDate();
-
   const cells = [];
-  for (let i = startDay - 1; i >= 0; i--) cells.push({ day: prevMonthLastDay - i, type: "prev" });
-  for (let i = 1; i <= daysInMonth; i++) cells.push({ day: i, type: "current" });
-  while (cells.length < 42) cells.push({ day: cells.length - daysInMonth - startDay + 1, type: "next" });
 
-  const isToday = (cell) => cell.type === "current" && viewYear === today.getFullYear() && viewMonth === today.getMonth() && cell.day === today.getDate();
+  for (let i = firstDay.getDay() - 1; i >= 0; i -= 1) cells.push({ day: prevMonthLastDay - i, type: "prev" });
+  for (let i = 1; i <= daysInMonth; i += 1) cells.push({ day: i, type: "current" });
+  while (cells.length < 42) cells.push({ day: cells.length - daysInMonth - firstDay.getDay() + 1, type: "next" });
 
-  const goPrev = () => { if (viewMonth === 0) { setViewYear(viewYear - 1); setViewMonth(11); } else setViewMonth(viewMonth - 1); };
-  const goNext = () => { if (viewMonth === 11) { setViewYear(viewYear + 1); setViewMonth(0); } else setViewMonth(viewMonth + 1); };
+  const goPrev = () => {
+    if (viewMonth === 0) {
+      setViewYear((v) => v - 1);
+      setViewMonth(11);
+    } else {
+      setViewMonth((v) => v - 1);
+    }
+  };
 
-  const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
+  const goNext = () => {
+    if (viewMonth === 11) {
+      setViewYear((v) => v + 1);
+      setViewMonth(0);
+    } else {
+      setViewMonth((v) => v + 1);
+    }
+  };
 
   return (
-    <div className="bg-white rounded-lg border border-sky-100 p-3">
-      <div className="flex items-center justify-between mb-2">
-        <div className="text-xs font-semibold text-sky-900">{viewYear}년 {viewMonth + 1}월</div>
-        <div className="flex gap-1">
-          <button onClick={goPrev} className="w-5 h-5 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center">
-            <ChevronLeft size={10} className="text-slate-600" />
-          </button>
-          <button onClick={goNext} className="w-5 h-5 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center">
-            <ChevronRight size={10} className="text-slate-600" />
-          </button>
+    <section className="panel compact">
+      <div className="panel-title-row">
+        <div>
+          <p className="eyebrow">Calendar</p>
+          <h2>{viewYear}년 {viewMonth + 1}월</h2>
+        </div>
+        <div className="icon-pair">
+          <button onClick={goPrev} aria-label="이전 달"><ChevronLeft size={15} /></button>
+          <button onClick={goNext} aria-label="다음 달"><ChevronRight size={15} /></button>
         </div>
       </div>
-      <div className="grid grid-cols-7 gap-px text-[9px]">
-        {weekdays.map((w, i) => (
-          <div key={w} className={"text-center font-semibold py-1 " + (i === 0 ? "text-red-500" : i === 6 ? "text-blue-500" : "text-slate-600")}>{w}</div>
-        ))}
+      <div className="mini-weekdays">
+        {["일", "월", "화", "수", "목", "금", "토"].map((w) => <span key={w}>{w}</span>)}
       </div>
-      <div className="grid grid-cols-7 gap-px text-[10px]">
+      <div className="mini-calendar-grid">
         {cells.map((cell, idx) => {
-          const colIdx = idx % 7;
-          const isCurr = cell.type === "current";
-          const todayCell = isToday(cell);
-          let textColor = "text-slate-700";
-          if (!isCurr) textColor = "text-slate-300";
-          else if (colIdx === 0) textColor = "text-red-500";
-          else if (colIdx === 6) textColor = "text-blue-500";
-
-          if (todayCell) {
-            return (
-              <div key={idx} className="flex items-center justify-center py-0.5">
-                <div className="w-[18px] h-[18px] bg-sky-500 text-white rounded-full flex items-center justify-center font-bold ring-2 ring-amber-400 ring-offset-1 ring-offset-white">
-                  {cell.day}
-                </div>
-              </div>
-            );
-          }
-          return <div key={idx} className={"text-center py-1 " + textColor}>{cell.day}</div>;
+          const isToday = cell.type === "current" && viewYear === today.getFullYear() && viewMonth === today.getMonth() && cell.day === today.getDate();
+          return (
+            <span key={`${cell.type}-${idx}`} className={`${cell.type !== "current" ? "dim" : ""} ${isToday ? "today" : ""}`}>
+              {cell.day}
+            </span>
+          );
         })}
       </div>
-    </div>
+    </section>
   );
 }
 
-// ===== 일지 카드 (인라인 편집) =====
-function EntryCard({ entry, isExpanded, isCurrent, isNew, onToggle, onUpdate, onSave, onDelete, onCancel }) {
+function EntryEditor({ entry, isCurrent, isNew, isExpanded, onToggle, onSave, onDelete, onCancel, onNotice }) {
   const [localData, setLocalData] = useState({
     author: entry.author || "",
     thisWeekDate: entry.thisWeekDate || getMondayDateStr(),
@@ -190,296 +239,867 @@ function EntryCard({ entry, isExpanded, isCurrent, isNew, onToggle, onUpdate, on
     nextWeekTasks: entry.nextWeekTasks || "",
     notes: entry.notes || "",
   });
-  const [editStatus, setEditStatus] = useState("idle"); // idle, editing, saving, saved
-  const [hasChanges, setHasChanges] = useState(false);
+  const [status, setStatus] = useState("idle");
   const saveTimerRef = useRef(null);
-  const statusTimerRef = useRef(null);
 
-  const avatar = getAvatarColor(localData.author || entry.author);
-
-  // entry 가 외부에서 바뀌면 localData 동기화 (단, 편집 중이 아닐 때만)
-  // entry.id가 바뀔 때만 localData 동기화 (다른 일지로 전환 시)
-  // 같은 일지가 저장되어 내용이 외부에서 바뀌어도 사용자의 입력은 그대로 유지
-  useEffect(() => {
-    setLocalData({
-      author: entry.author || "",
-      thisWeekDate: entry.thisWeekDate || getMondayDateStr(),
-      nextWeekDate: entry.nextWeekDate || getNextMonday(getMondayDateStr()),
-      thisWeekTasks: entry.thisWeekTasks || "",
-      nextWeekTasks: entry.nextWeekTasks || "",
-      notes: entry.notes || "",
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entry.id]);
-
-  // 자동 저장 (디바운싱 1.5초)
-  const scheduleAutoSave = useCallback((newData) => {
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    setEditStatus("editing");
-    setHasChanges(true);
-    saveTimerRef.current = setTimeout(() => {
-      doSave(newData);
-    }, 1500);
-  }, []);
-
-  // 즉시 저장 (수동 저장 버튼 클릭 시)
-  const doSave = async (dataToSave) => {
+  const doSave = useCallback(async (dataToSave) => {
     const data = dataToSave || localData;
-    // 작성자가 없으면 저장 안 함
-    if (!data.author || !data.author.trim()) {
-      setEditStatus("idle");
+    if (!data.author.trim() || !data.thisWeekTasks.trim()) {
+      setStatus("idle");
       return;
     }
-    // 이번주 할 일이 없으면 저장 안 함
-    if (!data.thisWeekTasks || !data.thisWeekTasks.trim()) {
-      setEditStatus("idle");
-      return;
-    }
-    setEditStatus("saving");
+
+    setStatus("saving");
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 
-    const weekLabel = getWeekInfo(data.thisWeekDate) + "(" + data.author + ")";
-    const payload = {
+    const result = await onSave(entry.id, {
       ...data,
-      weekLabel,
-    };
+      weekLabel: `${getWeekInfo(data.thisWeekDate)}(${data.author.trim()})`,
+    }, isNew);
 
-    const result = await onSave(entry.id, payload, isNew);
     if (result?.success) {
-      setEditStatus("saved");
-      setHasChanges(false);
-      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
-      statusTimerRef.current = setTimeout(() => setEditStatus("idle"), 1500);
+      setStatus("saved");
+      onNotice?.("저장되었습니다.", "success");
+      window.setTimeout(() => setStatus("idle"), 1200);
     } else {
-      setEditStatus("editing");
+      setStatus("editing");
     }
-  };
+  }, [entry.id, isNew, localData, onNotice, onSave]);
 
-  // 필드 변경 핸들러
-  const handleChange = (field, value) => {
-    const newData = { ...localData, [field]: value };
-    if (field === "thisWeekDate") {
-      newData.nextWeekDate = getNextMonday(value);
-    }
-    setLocalData(newData);
-    scheduleAutoSave(newData);
-  };
+  const scheduleSave = useCallback((next) => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    setStatus("editing");
+    saveTimerRef.current = window.setTimeout(() => doSave(next), 1400);
+  }, [doSave]);
 
-  // 컴포넌트 언마운트 시 타이머 정리
-  useEffect(() => {
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
-    };
+  useEffect(() => () => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
   }, []);
 
-  const weekLabel = localData.author ? getWeekInfo(localData.thisWeekDate) + "(" + localData.author + ")" : (entry.weekLabel || "새 일지");
+  const handleChange = (field, value) => {
+    const next = { ...localData, [field]: value };
+    if (field === "thisWeekDate") next.nextWeekDate = getNextMonday(value);
+    setLocalData(next);
+    scheduleSave(next);
+  };
 
-  // 카드 테두리 색상 (편집 상태에 따라)
-  let cardClass = "bg-white rounded-lg border border-slate-200 hover:border-sky-300 overflow-hidden relative group transition";
-  if (isNew || editStatus === "editing" || editStatus === "saving") {
-    cardClass = "bg-white rounded-lg border-2 border-amber-400 shadow-[0_0_0_3px_rgba(251,191,36,0.15)] overflow-hidden relative";
-  } else if (editStatus === "saved") {
-    cardClass = "bg-white rounded-lg border-2 border-emerald-500 shadow-[0_0_0_3px_rgba(16,163,74,0.15)] overflow-hidden relative transition";
-  } else if (isCurrent) {
-    cardClass = "bg-white rounded-lg border-2 border-sky-500 shadow-[0_0_0_3px_rgba(14,165,233,0.1)] overflow-hidden relative group";
-  }
+  const avatar = avatarFor(localData.author);
+  const heading = localData.author
+    ? `${getWeekInfo(localData.thisWeekDate)} · ${localData.author}`
+    : isNew ? "새 업무일지 작성" : entry.weekLabel;
 
   return (
-    <div className={cardClass}>
-      {/* 좌측 강조 띠 */}
-      <div className={
-        "absolute left-0 top-0 bottom-0 w-1 transition-opacity " +
-        (isNew || editStatus === "editing" || editStatus === "saving" ? "bg-amber-400 opacity-100"
-          : editStatus === "saved" ? "bg-emerald-500 opacity-100"
-          : isCurrent ? "bg-sky-500 opacity-100"
-          : "bg-sky-500 opacity-0 group-hover:opacity-60")
-      }></div>
-
-      {/* 헤더 */}
-      <div className="w-full px-5 py-3.5 flex items-center gap-3 text-left">
-        <button onClick={onToggle} className="flex items-center gap-3 flex-1 hover:bg-slate-50 -mx-2 px-2 py-1 rounded">
-          {isExpanded ? <ChevronDown size={15} className="text-slate-400 flex-shrink-0" /> : <ChevronRight size={15} className="text-slate-400 flex-shrink-0" />}
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {isNew ? (
-              <span className="bg-amber-400 text-amber-900 px-2 py-0.5 rounded text-[10px] font-semibold">✏️ 새 일지 작성 중</span>
-            ) : editStatus === "editing" ? (
-              <span className="bg-amber-400 text-amber-900 px-2 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1">
-                <Edit3Icon /> 편집 중
-              </span>
-            ) : editStatus === "saving" ? (
-              <span className="bg-amber-400 text-amber-900 px-2 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1">
-                <Loader2 size={10} className="animate-spin" /> 저장 중...
-              </span>
-            ) : editStatus === "saved" ? (
-              <span className="bg-emerald-500 text-white px-2 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1">
-                <Check size={10} /> 저장됨
-              </span>
-            ) : (
-              <>
-                {isCurrent && (
-                  <span className="bg-sky-500 text-white px-1.5 py-0.5 rounded text-[9px] font-medium">이번주</span>
-                )}
-                {entry.displayNumber && (
-                  <span className="text-[11px] font-mono text-slate-400">#{entry.displayNumber}</span>
-                )}
-              </>
-            )}
+    <article className={`work-card ${isCurrent ? "current" : ""} ${isNew ? "new" : ""} ${!isExpanded ? "collapsed" : ""}`}>
+      <div className="work-card-header">
+        <button className="work-card-toggle" onClick={onToggle} disabled={isNew} aria-expanded={isExpanded}>
+          <span className="fold-icon">
+            {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          </span>
+          {entry.displayNumber && <span className="entry-number">#{entry.displayNumber}</span>}
+          <span className="avatar" style={{ backgroundColor: avatar.bg, color: avatar.text }}>
+            {(localData.author || "?").slice(0, 1)}
+          </span>
+          <div>
+            <div className="work-title-row">
+              {localData.author ? (
+                <>
+                  <span className="week-pill">{getWeekInfo(localData.thisWeekDate)}</span>
+                  <h3>{localData.author}</h3>
+                </>
+              ) : (
+                <h3>{heading}</h3>
+              )}
+              {isCurrent && <span className="badge blue">이번 주</span>}
+              {isNew && <span className="badge amber">신규</span>}
+            </div>
+            <p>{localData.thisWeekDate} 시작 · 다음 주 {localData.nextWeekDate}</p>
           </div>
-          <div className="flex-1 text-sm font-medium">{weekLabel}</div>
         </button>
-
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {hasChanges && (
-            <button onClick={() => doSave()} className="px-3 py-1 text-xs font-semibold bg-sky-900 text-white rounded hover:bg-sky-800 flex items-center gap-1.5">
-              <Save size={11} />
-              저장
+        <div className="work-actions">
+          {status === "editing" && <span className="save-state amber"><CircleDot size={12} /> 편집 중</span>}
+          {status === "saving" && <span className="save-state"><Loader2 size={12} className="spin" /> 저장 중</span>}
+          {status === "saved" && <span className="save-state green"><Check size={12} /> 저장됨</span>}
+          <button className="btn btn-primary" onClick={() => doSave()}>
+            <Save size={15} /> 저장
+          </button>
+          {isNew ? (
+            <button className="btn btn-ghost" onClick={onCancel}>취소</button>
+          ) : (
+            <button className="icon-btn danger" onClick={() => onDelete(entry.id)} aria-label="삭제">
+              <Trash2 size={16} />
             </button>
-          )}
-          {isNew && (
-            <button onClick={onCancel} className="px-3 py-1 text-xs text-slate-600 hover:bg-slate-100 rounded border border-slate-200">
-              취소
-            </button>
-          )}
-          {!isNew && (
-            <>
-              <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold" style={{ backgroundColor: avatar.bg, color: avatar.text }}>
-                {(localData.author || entry.author || "?").charAt(0)}
-              </div>
-              <span className="text-xs text-slate-600">{localData.author || entry.author}</span>
-            </>
           )}
         </div>
       </div>
 
-      {/* 펼친 본문 */}
       {isExpanded && (
-        <div className="px-5 pb-4 pt-2 border-t border-slate-100">
-          {/* 작성자 + 날짜 (인라인 편집) */}
-          <div className="grid grid-cols-3 gap-3 mb-3">
-            <div>
-              <label className="text-[11px] font-semibold text-slate-600 mb-1 block">작성자 *</label>
-              <input
-                type="text"
-                value={localData.author}
-                onChange={(e) => handleChange("author", e.target.value)}
-                placeholder="이름을 입력하세요"
-                className="w-full px-3 py-1.5 border border-slate-200 rounded text-sm focus:outline-none focus:border-sky-500"
-              />
-            </div>
-            <div>
-              <label className="text-[11px] font-semibold text-slate-600 mb-1 block">이번주 시작일 (월)</label>
-              <input
-                type="date"
-                value={localData.thisWeekDate}
-                onChange={(e) => handleChange("thisWeekDate", e.target.value)}
-                className="w-full px-3 py-1.5 border border-slate-200 rounded text-sm focus:outline-none focus:border-sky-500"
-              />
-            </div>
-            <div>
-              <label className="text-[11px] font-semibold text-slate-600 mb-1 block">다음주 (자동)</label>
-              <input
-                type="date"
-                value={localData.nextWeekDate}
-                disabled
-                className="w-full px-3 py-1.5 border border-slate-200 rounded text-sm bg-slate-50 text-slate-500"
-              />
-            </div>
+        <>
+          <div className="entry-meta-grid">
+            <label>
+              <span>작성자</span>
+              <input value={localData.author} onChange={(e) => handleChange("author", e.target.value)} placeholder="이름" />
+            </label>
+            <label>
+              <span>이번 주 시작일</span>
+              <input type="date" value={localData.thisWeekDate} onChange={(e) => handleChange("thisWeekDate", e.target.value)} />
+            </label>
+            <label>
+              <span>다음 주 시작일</span>
+              <input type="date" value={localData.nextWeekDate} disabled />
+            </label>
           </div>
 
-          {/* 3단 그리드 - 컬러 헤더 카드 */}
-          <div className="grid grid-cols-3 gap-3 mb-4">
-            {/* 이번주 할 일 (파랑톤) */}
-            <div className="rounded-md overflow-hidden border border-sky-200">
-              <div className="bg-sky-900 text-white px-3.5 py-2 text-sm font-semibold">
-                이번주 할 일 · {localData.thisWeekDate}
+          <div className="worksheet-grid">
+            <section className="sheet-column this-week">
+              <div className="sheet-head">
+                <Clock3 size={16} />
+                <span>이번 주 수행</span>
               </div>
-              <div className="bg-sky-50 p-1">
-                <AutoResizeTextarea
-                  value={localData.thisWeekTasks}
-                  onChange={(e) => handleChange("thisWeekTasks", e.target.value)}
-                  placeholder="예) 1. 탄성파 탐사&#10;  1) 명랑 해상풍력단지&#10;    - 최종 보고서 제출"
-                  minRows={30}
-                  className="w-full px-3 py-2 text-sm text-slate-800 bg-white rounded font-sans leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-sky-300 border-0"
-                />
+              <AutoResizeTextarea
+                value={localData.thisWeekTasks}
+                onChange={(e) => handleChange("thisWeekTasks", e.target.value)}
+                placeholder={"1. 프로젝트명\n  - 진행 내용\n  - 완료/이슈/결과"}
+                minRows={16}
+                className="sheet-textarea"
+              />
+            </section>
+            <section className="sheet-column next-week">
+              <div className="sheet-head">
+                <CalendarDays size={16} />
+                <span>다음 주 계획</span>
               </div>
-            </div>
-
-            {/* 다음주 할 일 (회색톤) */}
-            <div className="rounded-md overflow-hidden border border-slate-200">
-              <div className="bg-slate-600 text-white px-3.5 py-2 text-sm font-semibold">
-                다음주 할 일 · {localData.nextWeekDate}
+              <AutoResizeTextarea
+                value={localData.nextWeekTasks}
+                onChange={(e) => handleChange("nextWeekTasks", e.target.value)}
+                placeholder={"1. 예정 업무\n  - 준비할 자료\n  - 협의 필요 사항"}
+                minRows={16}
+                className="sheet-textarea"
+              />
+            </section>
+            <section className="sheet-column notes">
+              <div className="sheet-head">
+                <AlertCircle size={16} />
+                <span>확인 사항</span>
               </div>
-              <div className="bg-slate-50 p-1">
-                <AutoResizeTextarea
-                  value={localData.nextWeekTasks}
-                  onChange={(e) => handleChange("nextWeekTasks", e.target.value)}
-                  placeholder="다음주 계획을 입력하세요..."
-                  minRows={30}
-                  className="w-full px-3 py-2 text-sm text-slate-800 bg-white rounded font-sans leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-slate-300 border-0"
-                />
-              </div>
-            </div>
-
-            {/* 확인 사항 (노랑톤) */}
-            <div className="rounded-md overflow-hidden border border-amber-200">
-              <div className="bg-amber-500 text-white px-3.5 py-2 text-sm font-semibold flex items-center gap-1.5">
-                <AlertCircle size={14} />
-                확인 사항
-              </div>
-              <div className="bg-amber-50 p-1">
-                <AutoResizeTextarea
-                  value={localData.notes}
-                  onChange={(e) => handleChange("notes", e.target.value)}
-                  placeholder="민방위 훈련, 회의 일정, 특이사항 등..."
-                  minRows={30}
-                  className="w-full px-3 py-2 text-sm text-amber-900 bg-white rounded font-sans leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-amber-300 border-0"
-                />
-              </div>
-            </div>
+              <AutoResizeTextarea
+                value={localData.notes}
+                onChange={(e) => handleChange("notes", e.target.value)}
+                placeholder={"미수금, 회의 일정, 승인 대기, 공유할 내용"}
+                minRows={16}
+                className="sheet-textarea"
+              />
+            </section>
           </div>
+        </>
+      )}
+    </article>
+  );
+}
 
-          {/* 하단 안내 + 삭제 버튼 */}
-          <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-            <div className="text-[11px] text-slate-400">
-              💡 입력 후 1.5초 멈추면 자동 저장됩니다
-            </div>
-            {!isNew && (
-              <button onClick={() => onDelete(entry.id)} className="px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 rounded flex items-center gap-1.5 border border-red-200">
-                <Trash2 size={11} />
-                삭제
-              </button>
-            )}
-          </div>
+function JournalView({ loading, searchQuery, setSearchQuery, authorFilter, setAuthorFilter, authors, filteredEntries, newEntry, onNewEntry, onCancelNew, onSave, onDelete, onRefresh, onNotice }) {
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
+  const [hasManualFold, setHasManualFold] = useState(false);
+  const defaultExpandedId = useMemo(
+    () => filteredEntries.find((entry) => isThisWeek(entry.thisWeekDate))?.id || filteredEntries[0]?.id || null,
+    [filteredEntries],
+  );
+
+  function toggleEntry(entryId) {
+    setHasManualFold(true);
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(entryId) || (!hasManualFold && entryId === defaultExpandedId)) {
+        next.delete(entryId);
+      } else {
+        next.add(entryId);
+      }
+      return next;
+    });
+  }
+
+  return (
+    <div className="journal-layout">
+      <div className="toolbar panel">
+        <div className="search-box">
+          <Search size={17} />
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="업무 내용, 작성자, 메모 검색"
+          />
+          {searchQuery && <button onClick={() => setSearchQuery("")} aria-label="검색어 지우기"><X size={15} /></button>}
+        </div>
+        <div className="select-filter">
+          <Filter size={15} />
+          <select value={authorFilter} onChange={(e) => setAuthorFilter(e.target.value)}>
+            {authors.map((author) => <option key={author} value={author}>{author}</option>)}
+          </select>
+        </div>
+        <button className="btn btn-ghost" onClick={() => onRefresh(false)}>
+          <RefreshCw size={15} /> 새로고침
+        </button>
+        <button className="btn btn-primary" disabled={newEntry !== null} onClick={onNewEntry}>
+          <Plus size={16} /> 새 업무일지
+        </button>
+      </div>
+
+      <div className="result-line">
+        {loading ? "데이터를 불러오는 중입니다." : `${filteredEntries.length}개의 업무일지`}
+        {newEntry && <span> · 새 업무일지 작성 중</span>}
+      </div>
+
+      {loading && (
+        <div className="empty-state panel">
+          <Loader2 size={18} className="spin" />
+          <p>업무일지를 불러오는 중입니다.</p>
+        </div>
+      )}
+
+      <div className="work-list">
+        {newEntry && (
+          <EntryEditor
+            entry={newEntry}
+            isNew
+            isExpanded
+            onToggle={() => {}}
+            onSave={onSave}
+            onDelete={onDelete}
+            onCancel={onCancelNew}
+            onNotice={onNotice}
+          />
+        )}
+        {filteredEntries.map((entry) => (
+          <EntryEditor
+            key={entry.id}
+            entry={entry}
+            isCurrent={isThisWeek(entry.thisWeekDate)}
+            isExpanded={expandedIds.has(entry.id) || (!hasManualFold && entry.id === defaultExpandedId)}
+            onToggle={() => toggleEntry(entry.id)}
+            onSave={onSave}
+            onDelete={onDelete}
+            onNotice={onNotice}
+          />
+        ))}
+      </div>
+
+      {!loading && filteredEntries.length === 0 && !newEntry && (
+        <div className="empty-state panel">
+          <Archive size={22} />
+          <h3>표시할 업무일지가 없습니다.</h3>
+          <p>검색어 또는 작성자 필터를 조정해보세요.</p>
         </div>
       )}
     </div>
   );
 }
 
-// 작은 아이콘 컴포넌트 (Edit3 대체)
-function Edit3Icon() {
+function Sidebar({ view, setView, stats, centerStats, currentUser, onLogout }) {
   return (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 20h9"/>
-      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
-    </svg>
+    <aside className="app-sidebar">
+      <button className="brand-lockup" onClick={() => setView("dashboard")} title="대시보드로 이동">
+        <img src="/logo.jpg" alt="Marine & Geo" />
+        <div>
+          <strong>MARINE &amp; GEO · ERP</strong>
+          <span>Internal Management System / v001</span>
+        </div>
+      </button>
+
+      <div className="side-user">
+        <div className="side-user-info">
+          <span
+            className="side-user-avatar"
+            style={{ background: avatarFor(currentUser).bg, color: avatarFor(currentUser).text }}
+          >
+            {(currentUser || "?").slice(0, 1)}
+          </span>
+          <div>
+            <strong>{currentUser}</strong>
+            <span>로그인됨</span>
+          </div>
+        </div>
+        <button className="icon-btn" title="로그아웃" onClick={onLogout}><LogOut size={15} /></button>
+      </div>
+
+      <nav className="side-nav">
+        {NAV_ITEMS.map((item) => {
+          const Icon = item.icon;
+          return (
+            <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>
+              <Icon size={17} />
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
+      </nav>
+
+      <section className="panel compact side-summary">
+        <p className="eyebrow">이번주 주간업무보고</p>
+        <div className="side-metric">
+          <strong>{stats.thisWeekSubmitted.length}</strong>
+          <span>/ {Math.max(stats.authorCount, 1)}명 제출</span>
+        </div>
+        <div className="progress-track">
+          <span style={{ width: `${stats.submittedRate}%` }} />
+        </div>
+        <p>{stats.submittedRate}% 완료</p>
+
+        <div className="side-divider" />
+        <p className="eyebrow">해양벤처진흥센터 · 마감 기준</p>
+        <div className="side-metric">
+          <strong>{centerStats.doneWithDue}</strong>
+          <span>/ {centerStats.withDue}건 처리</span>
+        </div>
+        <div className="progress-track">
+          <span style={{ width: `${centerStats.dueRate}%` }} />
+        </div>
+        <p>{centerStats.dueSoon > 0 ? `마감 임박 ${centerStats.dueSoon}건` : "마감 임박 없음"}</p>
+      </section>
+
+      <MiniCalendar />
+    </aside>
   );
 }
 
-export default function App() {
-  const [view, setView] = useState("journal");  // 'journal' | 'leave'
+function Topbar({ view, stats }) {
+  const current = NAV_ITEMS.find((item) => item.id === view);
+  const title = current?.label || "주간업무";
+  return (
+    <header className="app-topbar">
+      <div>
+        <p className="eyebrow">Marine & Geo · {todayLabel()}</p>
+        <h1>{title}</h1>
+      </div>
+      <div className="topbar-stats">
+        <span><Users size={15} /> 작성자 {stats.authorCount}명</span>
+        <span><FileText size={15} /> 일지 {stats.totalEntries}건</span>
+        <span><Check size={15} /> 이번 주 {stats.thisWeekSubmitted.length}건</span>
+      </div>
+    </header>
+  );
+}
+
+const DASH_ACTION_STATUSES = ["신규", "확인필요", "자료준비", "승인대기"];
+const DASH_CENTER_STATUS_ORDER = ["신규", "확인필요", "자료준비", "승인대기", "제출완료", "보관"];
+
+function startOfToday() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+function ymdToDate(s) {
+  return s ? new Date(s + "T00:00:00") : null;
+}
+function ddayFrom(s, today) {
+  const d = ymdToDate(s);
+  return d ? Math.round((d - today) / 86400000) : null;
+}
+function ddayLabel(d) {
+  if (d == null) return "";
+  if (d < 0) return `${-d}일 지남`;
+  if (d === 0) return "오늘";
+  return `D-${d}`;
+}
+function fmtMD(s) {
+  if (!s) return "";
+  const p = s.split("-");
+  return `${Number(p[1])}/${Number(p[2])}`;
+}
+function activeLeave(r) {
+  return r.status !== "rejected" && r.status !== "cancelled";
+}
+function leaveOverlaps(r, a, b) {
+  const s = ymdToDate(r.start_date);
+  const e = ymdToDate(r.end_date || r.start_date);
+  return s && e && s <= b && e >= a;
+}
+
+function Dashboard({ entries, journalStats, centerTasks, leaveRequests, setView }) {
+  const today = useMemo(() => startOfToday(), []);
+  const weekStart = useMemo(() => {
+    const d = new Date(today);
+    const wd = d.getDay();
+    d.setDate(d.getDate() + (wd === 0 ? -6 : 1 - wd));
+    return d;
+  }, [today]);
+  const weekEnd = useMemo(() => {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate() + 6);
+    return d;
+  }, [weekStart]);
+  const monthStart = useMemo(() => new Date(today.getFullYear(), today.getMonth(), 1), [today]);
+  const monthEnd = useMemo(() => new Date(today.getFullYear(), today.getMonth() + 1, 0), [today]);
+  const in14 = useMemo(() => {
+    const d = new Date(today);
+    d.setDate(d.getDate() + 14);
+    return d;
+  }, [today]);
+
+  const centerD = useMemo(
+    () => centerTasks.map((t) => ({ ...t, _d: ddayFrom(t.due_date, today) })),
+    [centerTasks, today],
+  );
+
+  const kpi = useMemo(() => {
+    const urgent = centerD.filter((t) => DASH_ACTION_STATUSES.includes(t.status) && t._d != null && t._d <= 7).length;
+    const overdue = centerD.filter((t) => t.status !== "제출완료" && t.status !== "보관" && t._d != null && t._d < 0).length;
+    const expected = Math.max(journalStats.authorCount, 3);
+    const submitted = journalStats.thisWeekSubmitted.length;
+    const absentWeek = new Set(
+      leaveRequests.filter((r) => activeLeave(r) && leaveOverlaps(r, weekStart, weekEnd)).map((r) => r.author),
+    ).size;
+    const upcoming = leaveRequests.filter((r) => {
+      if (!activeLeave(r)) return false;
+      const s = ymdToDate(r.start_date);
+      return s && s > today && s <= in14;
+    }).length;
+    return { urgent, overdue, submitted, expected, absentWeek, upcoming };
+  }, [centerD, journalStats, leaveRequests, weekStart, weekEnd, today, in14]);
+
+  const actions = useMemo(
+    () =>
+      centerD
+        .filter((t) => DASH_ACTION_STATUSES.includes(t.status))
+        .sort((a, b) => (a._d == null ? 99999 : a._d) - (b._d == null ? 99999 : b._d))
+        .slice(0, 8),
+    [centerD],
+  );
+
+  const timeline = useMemo(() => {
+    const g = [
+      { key: "overdue", label: "마감 초과", tone: "red", items: [] },
+      { key: "today", label: "오늘", tone: "red", items: [] },
+      { key: "d3", label: "3일 내", tone: "amber", items: [] },
+      { key: "d7", label: "7일 내", tone: "amber", items: [] },
+      { key: "later", label: "이후", tone: "muted", items: [] },
+    ];
+    centerD
+      .filter((t) => t.due_date && t.status !== "제출완료" && t.status !== "보관")
+      .sort((a, b) => a._d - b._d)
+      .forEach((t) => {
+        const d = t._d;
+        if (d < 0) g[0].items.push(t);
+        else if (d === 0) g[1].items.push(t);
+        else if (d <= 3) g[2].items.push(t);
+        else if (d <= 7) g[3].items.push(t);
+        else g[4].items.push(t);
+      });
+    return g.filter((row) => row.items.length > 0);
+  }, [centerD]);
+
+  const journalSummary = useMemo(() => {
+    const names = Object.keys(journalStats.authorStats);
+    const list = names.length ? names : ["여은민", "김찬수", "최승표"];
+    const projectRe = /^\d+\)/;     // "6) 제주 신창지역 SBP 탐사"
+    const categoryRe = /^\d+\.\s/;  // "1. 탄성파 탐사" (대분류 → 문맥 제외)
+    return list.map((name) => {
+      const sorted = entries
+        .filter((e) => e.author === name)
+        .slice()
+        .sort((a, b) => (b.thisWeekDate || "").localeCompare(a.thisWeekDate || ""));
+      const latest = sorted[0];
+      const prev = sorted[1];
+      const prevLines = new Set(
+        (prev?.thisWeekTasks || "").split("\n").map((s) => s.trim()).filter(Boolean),
+      );
+      // 업데이트(지난주 대비 신규)를 상위 프로젝트(N))로 묶어 표시 — 어느 프로젝트인지 보이게
+      const groups = [];
+      const ensure = (proj) => {
+        let g = groups.find((x) => x.project === proj);
+        if (!g) { g = { project: proj, items: [] }; groups.push(g); }
+        return g;
+      };
+      let cur = null;
+      for (const raw of (latest?.thisWeekTasks || "").split("\n")) {
+        const line = raw.trim();
+        if (!line) continue;
+        if (categoryRe.test(line)) { cur = null; continue; }
+        if (projectRe.test(line)) {
+          cur = line;
+          if (!prevLines.has(line)) ensure(line); // 신규 프로젝트면 헤더만이라도 표시
+          continue;
+        }
+        if (!prevLines.has(line)) {
+          ensure(cur || "기타").items.push(line.replace(/^[-•]\s*/, ""));
+        }
+      }
+      return {
+        name,
+        submitted: latest ? isThisWeek(latest.thisWeekDate) : false,
+        weekLabel: latest?.weekLabel || "",
+        groups: groups.slice(0, 6),
+        notes: (latest?.notes || "").trim(),
+      };
+    });
+  }, [entries, journalStats.authorStats]);
+
+  const leaveToday = useMemo(
+    () => leaveRequests.filter((r) => activeLeave(r) && leaveOverlaps(r, today, today)),
+    [leaveRequests, today],
+  );
+  const leaveUpcoming = useMemo(
+    () =>
+      leaveRequests
+        .filter((r) => {
+          if (!activeLeave(r)) return false;
+          const s = ymdToDate(r.start_date);
+          return s && s > today && s <= in14;
+        })
+        .slice(0, 6),
+    [leaveRequests, today, in14],
+  );
+  const leaveMonthCount = useMemo(
+    () => leaveRequests.filter((r) => activeLeave(r) && leaveOverlaps(r, monthStart, monthEnd)).length,
+    [leaveRequests, monthStart, monthEnd],
+  );
+
+  const statusCounts = useMemo(
+    () => DASH_CENTER_STATUS_ORDER.map((s) => ({ s, n: centerTasks.filter((t) => t.status === s).length })),
+    [centerTasks],
+  );
+
+  return (
+    <div className="dashboard">
+      {/* ── 상단 navy 요약 띠 ── */}
+      <div className="dash-strip">
+        <div>
+          <p className="dash-strip-eyebrow">MARINE &amp; GEO · {todayLabel()}</p>
+          <p className="dash-strip-msg">
+            마감 초과 {kpi.overdue} · 센터 긴급 {kpi.urgent} · 주간업무 {kpi.submitted}/{kpi.expected} · 이번 주 부재 {kpi.absentWeek}
+          </p>
+        </div>
+        <span className={`badge ${kpi.overdue > 0 ? "red" : kpi.urgent > 0 ? "amber" : "green"}`}>
+          {kpi.overdue > 0 ? `마감 초과 ${kpi.overdue}건` : kpi.urgent > 0 ? `처리 대기 ${kpi.urgent}건` : "이상 없음"}
+        </span>
+      </div>
+
+      {/* ── KPI 스트립 ── */}
+      <div className="dash-kpis">
+        <button className="kpi-card tone-red" onClick={() => setView("center")}>
+          <span className="kpi-accent" />
+          <span className="kpi-icon"><AlertCircle size={18} /></span>
+          <span className="kpi-body"><strong className="kpi-value">{kpi.urgent}</strong><span className="kpi-label">센터 긴급 대응</span></span>
+        </button>
+        <button className="kpi-card tone-redstrong" onClick={() => setView("center")}>
+          <span className="kpi-accent" />
+          <span className="kpi-icon"><Clock3 size={18} /></span>
+          <span className="kpi-body"><strong className="kpi-value">{kpi.overdue}</strong><span className="kpi-label">마감 초과</span></span>
+        </button>
+        <button className="kpi-card tone-blue" onClick={() => setView("journal")}>
+          <span className="kpi-accent" />
+          <span className="kpi-icon"><FileText size={18} /></span>
+          <span className="kpi-body"><strong className="kpi-value">{kpi.submitted}/{kpi.expected}</strong><span className="kpi-label">이번 주 주간업무</span></span>
+        </button>
+        <button className="kpi-card tone-amber" onClick={() => setView("leave")}>
+          <span className="kpi-accent" />
+          <span className="kpi-icon"><Plane size={18} /></span>
+          <span className="kpi-body"><strong className="kpi-value">{kpi.absentWeek}</strong><span className="kpi-label">이번 주 부재 인원</span></span>
+        </button>
+        <button className="kpi-card tone-mint" onClick={() => setView("leave")}>
+          <span className="kpi-accent" />
+          <span className="kpi-icon"><CalendarDays size={18} /></span>
+          <span className="kpi-body"><strong className="kpi-value">{kpi.upcoming}</strong><span className="kpi-label">다가오는 휴가·출장</span></span>
+        </button>
+      </div>
+
+      {/* ── 1행: 액션리스트(8) + 마감 타임라인(4) ── */}
+      <div className="dash-row">
+        <section className="panel span7">
+          <div className="panel-title-row">
+            <h3><span className="panel-ic ic-red"><AlertCircle size={15} /></span> 확인 필요 · 처리 대기</h3>
+            <button className="btn btn-ghost" onClick={() => setView("center")}>센터 열기</button>
+          </div>
+          {actions.length === 0 ? (
+            <div className="dash-empty">처리 대기 중인 센터 업무가 없습니다. 👍</div>
+          ) : (
+            <ul className="action-list">
+              {actions.map((t) => (
+                <li
+                  key={t.id}
+                  className={t._d != null && t._d < 0 ? "is-danger" : t._d != null && t._d <= 7 ? "is-warning" : ""}
+                  onClick={() => setView("center")}
+                >
+                  <span className={`badge ${t._d == null ? "muted" : t._d < 0 ? "red" : t._d <= 7 ? "amber" : "muted"}`}>
+                    {t._d == null ? "마감없음" : ddayLabel(t._d)}
+                  </span>
+                  <span className="action-title">{t.title}</span>
+                  <span className="action-meta">{t.category} · {t.status}{t.priority === "높음" ? " · 높음" : ""}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="panel span5">
+          <div className="panel-title-row"><h3><span className="panel-ic ic-amber"><Clock3 size={15} /></span> 마감 타임라인</h3></div>
+          {timeline.length === 0 ? (
+            <div className="dash-empty">예정된 마감이 없습니다.</div>
+          ) : (
+            <div className="timeline">
+              {timeline.map((row) => (
+                <div className="timeline-row" key={row.key}>
+                  <span className={`badge ${row.tone}`}>{row.label} {row.items.length}</span>
+                  <span className="tl-line">
+                    {row.items.map((t, i) => (
+                      <span className="tl-item" key={t.id}>
+                        <em>{fmtMD(t.due_date)}</em> {t.title}{i < row.items.length - 1 ? "  ·  " : ""}
+                      </span>
+                    ))}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+
+      {/* ── 2행: 주간업무 직원별 업데이트 + 확인사항 (전체폭) ── */}
+      <div className="dash-row">
+        <section className="panel span12">
+          <div className="panel-title-row">
+            <h3><span className="panel-ic ic-blue"><FileText size={15} /></span> 주간업무 · 직원별 업데이트</h3>
+            <button className="btn btn-ghost" onClick={() => setView("journal")}>주간업무 열기</button>
+          </div>
+          <div className="journal-cards">
+            {journalSummary.map((p) => (
+              <div className="jcard" key={p.name}>
+                <div className="jcard-head">
+                  <span className={`dot ${p.submitted ? "on" : "off"}`} />
+                  <strong>{p.name}</strong>
+                  {p.submitted
+                    ? <span className="badge green">이번주 제출</span>
+                    : <span className="badge muted">{p.weekLabel || "미제출"}</span>}
+                </div>
+                <p className="sub-label">업데이트 업무 <em>(지난주 대비)</em></p>
+                {p.groups.length ? (
+                  <div className="jgroups">
+                    {p.groups.map((g) => (
+                      <div className="jgroup" key={g.project}>
+                        <p className="jgroup-title">{g.project}</p>
+                        {g.items.length > 0 && (
+                          <ul className="jcard-lines">
+                            {g.items.map((l, i) => <li key={i}>{l}</li>)}
+                          </ul>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="dash-empty compact">신규 업데이트 없음</div>
+                )}
+                <p className="sub-label">확인 사항</p>
+                {p.notes ? (
+                  <p className="jcard-notes">{p.notes}</p>
+                ) : (
+                  <div className="dash-empty compact">확인 사항 없음</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      {/* ── 3행: 부재·출장(6) + 운영 스냅샷(6) ── */}
+      <div className="dash-row">
+        <section className="panel span6">
+          <div className="panel-title-row">
+            <h3><span className="panel-ic ic-mint"><Plane size={15} /></span> 부재 · 출장</h3>
+            <button className="btn btn-ghost" onClick={() => setView("leave")}>일정 열기</button>
+          </div>
+          <p className="sub-label">오늘 부재</p>
+          {leaveToday.length === 0 ? (
+            <div className="dash-empty compact">오늘 부재 인원이 없습니다.</div>
+          ) : (
+            <ul className="leave-list">
+              {leaveToday.map((r) => (
+                <li key={r.id}>
+                  <strong>{r.author}</strong>
+                  <span>{r.leave_type_name}{r.destination ? ` · ${r.destination}` : ""}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="sub-label">다가오는 14일 ({leaveUpcoming.length})</p>
+          {leaveUpcoming.length === 0 ? (
+            <div className="dash-empty compact">예정된 휴가·출장이 없습니다.</div>
+          ) : (
+            <ul className="leave-list">
+              {leaveUpcoming.map((r) => (
+                <li key={r.id}>
+                  <em>{fmtMD(r.start_date)}{r.end_date && r.end_date !== r.start_date ? `~${fmtMD(r.end_date)}` : ""}</em>
+                  <strong>{r.author}</strong>
+                  <span>{r.leave_type_name}{r.destination ? ` · ${r.destination}` : ""}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="panel span6">
+          <div className="panel-title-row"><h3><span className="panel-ic ic-navy"><CircleDot size={15} /></span> 운영 스냅샷</h3></div>
+          <div className="snapshot snapshot-stack">
+            <div className="snap-block">
+              <p className="sub-label">해양벤처진흥센터 상태</p>
+              <div className="snap-badges">
+                {statusCounts.map((c) => (
+                  <span key={c.s} className="badge muted">{c.s} {c.n}</span>
+                ))}
+              </div>
+            </div>
+            <div className="snap-block">
+              <p className="sub-label">휴가·출장</p>
+              <div className="snap-badges">
+                <span className="badge muted">이번 달 {leaveMonthCount}건</span>
+                <span className="badge muted">전체 {leaveRequests.length}건</span>
+              </div>
+            </div>
+            <div className="snap-block">
+              <p className="sub-label">주간업무</p>
+              <div className="snap-badges">
+                <span className="badge muted">총 {entries.length}건</span>
+                <span className="badge muted">작성자 {journalStats.authorCount}명</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+// ── 로그인 (MG Auditor식 ID/PIN UX를 Supabase Auth 위에 얹음) ──
+// 아이디 → 실제 Supabase Auth 이메일 매핑. 이메일을 직접 입력해도 로그인 허용.
+const ERP_ACCOUNTS = {
+  yeoeunmin:    { email: "geomin99@gmail.com",    name: "여은민" },
+  kimchansu:    { email: "chanse7979@gmail.com",  name: "김찬수" },
+  choiseungpyo: { email: "pyoring94@gmail.com",   name: "최승표" },
+  marinegeo:    { email: "marinegeo99@gmail.com", name: "마린엔지오" },
+};
+function usernameToEmail(input) {
+  const v = (input || "").trim().toLowerCase();
+  if (v.includes("@")) return v;                  // 이메일로 직접 로그인
+  return ERP_ACCOUNTS[v]?.email || v;             // 아이디 → 이메일
+}
+function displayNameForSession(session) {
+  const email = (session?.user?.email || "").toLowerCase();
+  const hit = Object.values(ERP_ACCOUNTS).find((a) => a.email === email);
+  return hit?.name || session?.user?.user_metadata?.display_name || email.split("@")[0] || "사용자";
+}
+
+function LoginScreen() {
+  const [username, setUsername] = useState("");
+  const [pin, setPin] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!username.trim() || !pin.trim()) { setErr("아이디와 PIN을 입력해주세요."); return; }
+    setBusy(true); setErr("");
+    const { error } = await supabase.auth.signInWithPassword({
+      email: usernameToEmail(username),
+      password: pin,
+    });
+    if (error) { setErr("아이디 또는 PIN이 올바르지 않습니다."); setBusy(false); return; }
+    // 성공 시 onAuthStateChange 가 화면을 전환
+  }
+
+  return (
+    <div className="login-shell" style={{ "--brand-navy": BRAND.navy, "--brand-blue": BRAND.blue, "--brand-accent": BRAND.accent }}>
+      <form className="login-card" onSubmit={submit}>
+        <div className="login-brand">
+          <img src="/logo.jpg" alt="Marine & Geo" />
+          <div>
+            <strong>MARINE &amp; GEO · ERP</strong>
+            <span>Internal Management System / v001</span>
+          </div>
+        </div>
+        <h2>로그인</h2>
+        <label>
+          <span>아이디</span>
+          <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus autoComplete="username" placeholder="아이디" />
+        </label>
+        <label>
+          <span>PIN</span>
+          <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} autoComplete="current-password" inputMode="numeric" placeholder="PIN" />
+        </label>
+        {err && <p className="login-error">{err}</p>}
+        <button className="btn btn-primary login-submit" type="submit" disabled={busy}>
+          {busy ? <Loader2 size={16} className="spin" /> : null} 로그인
+        </button>
+        <p className="login-foot">마린엔지오 내부 직원 전용</p>
+      </form>
+    </div>
+  );
+}
+
+function Workspace({ session }) {
+  const [view, setView] = useState("dashboard");
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [authorFilter, setAuthorFilter] = useState("전체");
-  const [expandedId, setExpandedId] = useState(null);
-  const [newEntry, setNewEntry] = useState(null); // 새 일지 임시 객체
+  const [newEntry, setNewEntry] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const [confirm, setConfirm] = useState(null);
+  const [centerTasks, setCenterTasks] = useState([]);
+  const [centerLoading, setCenterLoading] = useState(true);
 
-  useEffect(() => { fetchEntries(true); }, []);
+  const showNotice = useCallback((message, type = "info") => {
+    setNotice({ message, type });
+    window.setTimeout(() => setNotice(null), 2600);
+  }, []);
 
-  // isInitial: 초기 로딩일 때만 expandedId를 자동으로 설정
-  async function fetchEntries(isInitial = false) {
+  const fetchCenter = useCallback(async (isInitial = false) => {
+    if (isInitial) setCenterLoading(true);
+    const { data, error } = await supabase
+      .from("center_tasks")
+      .select("*")
+      .is("deleted_at", null)
+      .order("due_date", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: false });
+    // 테이블 미적용/조회 실패 시 토스트 없이 빈 목록으로 (운영 전 단계 대비)
+    setCenterTasks(error ? [] : data || []);
+    if (isInitial) setCenterLoading(false);
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchCenter(true);
+  }, [fetchCenter]);
+
+  const [leaveRequests, setLeaveRequests] = useState([]);
+  const fetchLeave = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("leave_requests")
+      .select("id, author, leave_type_name, start_date, end_date, status, destination, trip_purpose, is_all_day")
+      .order("start_date", { ascending: true });
+    setLeaveRequests(error ? [] : data || []);
+  }, []);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchLeave();
+  }, [fetchLeave]);
+
+  const centerStats = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let needCheck = 0, done = 0, dueSoon = 0, withDue = 0, doneWithDue = 0;
+    for (const t of centerTasks) {
+      if (t.status === "확인필요") needCheck += 1;
+      const isDone = t.status === "제출완료";
+      if (isDone) done += 1;
+      if (t.due_date) {
+        withDue += 1;
+        if (isDone || t.status === "보관") doneWithDue += 1;
+        const d = Math.round((new Date(t.due_date + "T00:00:00") - today) / 86400000);
+        if (d <= 7 && !isDone && t.status !== "보관") dueSoon += 1;
+      }
+    }
+    const dueRate = withDue > 0 ? Math.round((doneWithDue / withDue) * 100) : 0;
+    return { total: centerTasks.length, needCheck, done, dueSoon, withDue, doneWithDue, dueRate };
+  }, [centerTasks]);
+
+  const fetchEntries = useCallback(async (isInitial = false) => {
     if (isInitial) setLoading(true);
     const { data, error } = await supabase
       .from("journal_entries")
@@ -487,38 +1107,35 @@ export default function App() {
       .order("created_at", { ascending: true });
 
     if (error) {
-      alert("데이터 불러오기 실패: " + error.message);
+      showNotice(`데이터를 불러오지 못했습니다: ${error.message}`, "error");
     } else {
-      const formatted = data.map((e, idx) => ({
-        id: e.id,
-        displayNumber: idx + 1,
-        author: e.author,
-        weekLabel: e.week_label,
-        thisWeekDate: e.this_week_date,
-        nextWeekDate: e.next_week_date,
-        thisWeekTasks: e.this_week_tasks || "",
-        nextWeekTasks: e.next_week_tasks || "",
-        notes: e.notes || "",
-        createdAt: e.created_at,
+      const formatted = (data || []).map((entry, index) => ({
+        id: entry.id,
+        displayNumber: index + 1,
+        author: entry.author || "",
+        weekLabel: entry.week_label || "",
+        thisWeekDate: entry.this_week_date,
+        nextWeekDate: entry.next_week_date,
+        thisWeekTasks: entry.this_week_tasks || "",
+        nextWeekTasks: entry.next_week_tasks || "",
+        notes: entry.notes || "",
+        createdAt: entry.created_at,
       }));
-      const reversed = [...formatted].reverse();
-      setEntries(reversed);
-      // 초기 로딩일 때만 expandedId 자동 설정 (사용자가 펼친 상태 유지)
-      if (isInitial && newEntry === null) {
-        const thisWeekEntry = reversed.find((e) => isThisWeek(e.thisWeekDate));
-        if (thisWeekEntry) setExpandedId(thisWeekEntry.id);
-        else if (reversed.length > 0) setExpandedId(reversed[0].id);
-      }
+      setEntries([...formatted].reverse());
     }
     if (isInitial) setLoading(false);
-  }
+  }, [showNotice]);
 
-  // 통합 저장 함수 (새 일지 또는 기존 일지 업데이트)
+  useEffect(() => {
+    // Initial remote sync with Supabase.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchEntries(true);
+  }, [fetchEntries]);
+
   async function handleSave(id, data, isNew) {
     if (isNew) {
-      // 새 일지: insert
       const { data: inserted, error } = await supabase.from("journal_entries").insert([{
-        author: data.author,
+        author: data.author.trim(),
         week_label: data.weekLabel,
         this_week_date: data.thisWeekDate,
         next_week_date: data.nextWeekDate,
@@ -528,285 +1145,206 @@ export default function App() {
       }]).select();
 
       if (error) {
-        alert("저장 실패: " + error.message);
+        showNotice(`저장 실패: ${error.message}`, "error");
         return { success: false };
       }
-      // 새 일지 모드 종료
+
       setNewEntry(null);
-      if (inserted && inserted[0]) {
-        // 새로 생성된 일지를 entries 맨 위에 추가 (전체 새로고침 X)
-        const newId = inserted[0].id;
-        const newEntryFormatted = {
-          id: newId,
-          displayNumber: entries.length + 1,
-          author: data.author,
+      const row = inserted?.[0];
+      if (row) {
+        setEntries((prev) => [{
+          id: row.id,
+          displayNumber: prev.length + 1,
+          author: data.author.trim(),
           weekLabel: data.weekLabel,
           thisWeekDate: data.thisWeekDate,
           nextWeekDate: data.nextWeekDate,
           thisWeekTasks: data.thisWeekTasks,
           nextWeekTasks: data.nextWeekTasks,
           notes: data.notes,
-          createdAt: inserted[0].created_at,
-        };
-        // 다른 일지들의 displayNumber도 +1씩 올림
-        setEntries(prev => [newEntryFormatted, ...prev]);
-        setExpandedId(newId);
+          createdAt: row.created_at,
+        }, ...prev]);
       }
-      return { success: true };
-    } else {
-      // 기존 일지: update (전체 새로고침 X, 해당 항목만 부분 업데이트)
-      const { error } = await supabase.from("journal_entries").update({
-        author: data.author,
-        week_label: data.weekLabel,
-        this_week_date: data.thisWeekDate,
-        next_week_date: data.nextWeekDate,
-        this_week_tasks: data.thisWeekTasks,
-        next_week_tasks: data.nextWeekTasks,
-        notes: data.notes,
-      }).eq("id", id);
-
-      if (error) {
-        alert("저장 실패: " + error.message);
-        return { success: false };
-      }
-      // 해당 entry만 메모리에서 업데이트 (UI는 그대로)
-      setEntries(prev => prev.map(e =>
-        e.id === id
-          ? { ...e, author: data.author, weekLabel: data.weekLabel,
-              thisWeekDate: data.thisWeekDate, nextWeekDate: data.nextWeekDate,
-              thisWeekTasks: data.thisWeekTasks, nextWeekTasks: data.nextWeekTasks,
-              notes: data.notes }
-          : e
-      ));
       return { success: true };
     }
+
+    const { error } = await supabase.from("journal_entries").update({
+      author: data.author.trim(),
+      week_label: data.weekLabel,
+      this_week_date: data.thisWeekDate,
+      next_week_date: data.nextWeekDate,
+      this_week_tasks: data.thisWeekTasks,
+      next_week_tasks: data.nextWeekTasks,
+      notes: data.notes,
+    }).eq("id", id);
+
+    if (error) {
+      showNotice(`저장 실패: ${error.message}`, "error");
+      return { success: false };
+    }
+
+    setEntries((prev) => prev.map((entry) => (
+      entry.id === id
+        ? {
+          ...entry,
+          author: data.author.trim(),
+          weekLabel: data.weekLabel,
+          thisWeekDate: data.thisWeekDate,
+          nextWeekDate: data.nextWeekDate,
+          thisWeekTasks: data.thisWeekTasks,
+          nextWeekTasks: data.nextWeekTasks,
+          notes: data.notes,
+        }
+        : entry
+    )));
+    return { success: true };
   }
 
-  async function handleDelete(id) {
-    if (!confirm("정말 이 일지를 삭제하시겠어요? 삭제하면 복구할 수 없습니다.")) return;
+  function requestDelete(id) {
+    setConfirm({
+      id,
+      title: "업무일지를 삭제할까요?",
+      message: "삭제하면 복구하기 어렵습니다. 필요한 내용은 먼저 확인해주세요.",
+    });
+  }
+
+  async function confirmDelete() {
+    const id = confirm?.id;
+    if (!id) return;
+    setConfirm(null);
     const { error } = await supabase.from("journal_entries").delete().eq("id", id);
-    if (error) alert("삭제 실패: " + error.message);
-    else await fetchEntries();
+    if (error) {
+      showNotice(`삭제 실패: ${error.message}`, "error");
+      return;
+    }
+    setEntries((prev) => prev.filter((entry) => entry.id !== id));
+    showNotice("삭제되었습니다.", "success");
   }
 
   function handleNewEntry() {
-    const todayMonday = getMondayDateStr();
-    const newEntryData = {
+    const monday = getMondayDateStr();
+    setNewEntry({
       id: "NEW",
       author: "",
-      weekLabel: "새 일지",
-      thisWeekDate: todayMonday,
-      nextWeekDate: getNextMonday(todayMonday),
+      weekLabel: "새 업무일지",
+      thisWeekDate: monday,
+      nextWeekDate: getNextMonday(monday),
       thisWeekTasks: "",
       nextWeekTasks: "",
       notes: "",
+    });
+  }
+
+  const stats = useMemo(() => {
+    const authorStats = {};
+    entries.forEach((entry) => {
+      if (!entry.author) return;
+      authorStats[entry.author] = (authorStats[entry.author] || 0) + 1;
+    });
+    const thisWeekSubmitted = entries.filter((entry) => isThisWeek(entry.thisWeekDate)).map((entry) => entry.author).filter(Boolean);
+    const authorCount = Object.keys(authorStats).length;
+    const submittedRate = authorCount > 0 ? Math.round((new Set(thisWeekSubmitted).size / authorCount) * 100) : 0;
+    return {
+      authorStats,
+      authorCount,
+      submittedRate,
+      thisWeekSubmitted: [...new Set(thisWeekSubmitted)],
+      totalEntries: entries.length,
     };
-    setNewEntry(newEntryData);
-    setExpandedId("NEW");
-  }
+  }, [entries]);
 
-  function handleCancelNew() {
-    setNewEntry(null);
-  }
-
-  const authors = useMemo(() => ["전체", ...new Set(entries.map((e) => e.author))], [entries]);
+  const authors = useMemo(() => ["전체", ...Object.keys(stats.authorStats)], [stats.authorStats]);
 
   const filteredEntries = useMemo(() => {
-    return entries.filter((e) => {
-      const q = searchQuery.toLowerCase();
-      const matchesSearch = q === "" || e.thisWeekTasks.toLowerCase().includes(q) || e.weekLabel.toLowerCase().includes(q) || e.notes.toLowerCase().includes(q);
-      const matchesAuthor = authorFilter === "전체" || e.author === authorFilter;
-      return matchesSearch && matchesAuthor;
+    const q = searchQuery.trim().toLowerCase();
+    return entries.filter((entry) => {
+      const matchesAuthor = authorFilter === "전체" || entry.author === authorFilter;
+      const haystack = `${entry.author} ${entry.weekLabel} ${entry.thisWeekTasks} ${entry.nextWeekTasks} ${entry.notes}`.toLowerCase();
+      return matchesAuthor && (!q || haystack.includes(q));
     });
-  }, [entries, searchQuery, authorFilter]);
+  }, [authorFilter, entries, searchQuery]);
 
-  const authorStats = useMemo(() => {
-    const stats = {};
-    entries.forEach((e) => { stats[e.author] = (stats[e.author] || 0) + 1; });
-    return stats;
-  }, [entries]);
-
-  const thisWeekSubmitted = useMemo(() => {
-    return entries.filter((e) => isThisWeek(e.thisWeekDate)).map((e) => e.author);
-  }, [entries]);
-
-  const submittedRate = Object.keys(authorStats).length > 0
-    ? Math.round((thisWeekSubmitted.length / Object.keys(authorStats).length) * 100)
-    : 0;
+  const currentUser = displayNameForSession(session);
+  async function handleLogout() {
+    await supabase.auth.signOut();
+  }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900" style={{ fontFamily: "'Noto Sans KR', system-ui, sans-serif" }}>
-      <header className="sticky top-0 z-10 relative overflow-hidden" style={{ background: "linear-gradient(135deg, #1f3a5f 0%, #245f9a 100%)" }}>
-        <div className="absolute bottom-0 left-0 right-0 h-0.5" style={{ background: "linear-gradient(90deg, transparent 0%, #0b7cc1 30%, #14a8e8 70%, transparent 100%)" }}></div>
-        <div className="px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-white/15 rounded-lg flex items-center justify-center backdrop-blur">
-              <Calendar size={18} className="text-white" />
-            </div>
-            <div>
-              <h1 className="text-white text-lg font-medium tracking-tight">마린엔지오 사내 시스템</h1>
-              <p className="text-white/70 text-xs mt-0.5">{view === "journal" ? "주간업무일지" : "휴가·출장 관리"} · {getTodayKorean()}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {/* 탭 */}
-            <div className="flex bg-white/10 border border-white/20 rounded-md p-0.5 mr-2">
-              <button onClick={() => setView("journal")}
-                      className={"px-3 py-1 text-xs font-semibold rounded transition " + (view === "journal" ? "bg-white text-[#1f3a5f]" : "text-white/80 hover:text-white")}>
-                일지
-              </button>
-              <button onClick={() => setView("leave")}
-                      className={"px-3 py-1 text-xs font-semibold rounded transition flex items-center gap-1 " + (view === "leave" ? "bg-white text-[#1f3a5f]" : "text-white/80 hover:text-white")}>
-                <Plane size={12} /> 휴가·출장
-              </button>
-            </div>
-            {view === "journal" && (
-              <>
-                <button onClick={fetchEntries} className="px-3 py-1.5 text-sm text-white bg-white/10 hover:bg-white/20 border border-white/20 rounded-md flex items-center gap-1.5 transition">
-                  <RefreshCw size={14} />
-                  새로고침
-                </button>
-                <button onClick={handleNewEntry} disabled={newEntry !== null} className="px-4 py-1.5 text-sm font-semibold rounded-md flex items-center gap-1.5 transition shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed" style={{ background: "#0b7cc1", color: "#fff" }}>
-                  <Plus size={15} strokeWidth={3} />
-                  새 일지
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {/* ── 휴가·출장 화면 ─────────────────────────── */}
-      {view === "leave" && <LeaveView />}
-
-      {view === "journal" && (
-      <div className="px-6 py-6 grid grid-cols-12 gap-6">
-        <aside className="col-span-2 space-y-3">
-          <div className="bg-white border border-sky-100 rounded-lg p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <Users size={14} className="text-sky-900" />
-              <h2 className="text-sm font-semibold">팀원 현황</h2>
-            </div>
-            <div className="space-y-1">
-              {Object.entries(authorStats).map(([name, count]) => {
-                const submitted = thisWeekSubmitted.includes(name);
-                return (
-                  <div key={name} className="flex items-center justify-between py-1">
-                    <div className="flex items-center gap-2">
-                      <div className={"w-1.5 h-1.5 rounded-full " + (submitted ? "bg-emerald-500" : "bg-slate-300")}></div>
-                      <span className="text-xs text-slate-700">{name}</span>
-                    </div>
-                    <span className="text-[10px] text-slate-500 font-mono">{count}건</span>
-                  </div>
-                );
-              })}
-              {Object.keys(authorStats).length === 0 && !loading && (
-                <div className="text-xs text-slate-400 text-center py-3">아직 일지가 없습니다</div>
-              )}
-            </div>
-            <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2 text-[10px] text-slate-500">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
-              <span>이번주 제출 완료</span>
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-sky-200 p-4" style={{ background: "linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)" }}>
-            <div className="text-xs font-medium text-sky-900 mb-1.5">이번주 현황</div>
-            <div className="text-2xl font-bold text-sky-900 leading-none">
-              {thisWeekSubmitted.length}
-              <span className="text-base text-sky-700">/{Math.max(Object.keys(authorStats).length, 1)}</span>
-            </div>
-            <div className="text-[10px] text-slate-600 mt-1">제출률 {submittedRate}%</div>
-            <div className="mt-2 h-1 bg-white/60 rounded-full overflow-hidden">
-              <div className="h-full bg-sky-500 rounded-full transition-all" style={{ width: submittedRate + "%" }}></div>
-            </div>
-          </div>
-
-          <MiniCalendar />
-
-          <div className="bg-white border border-sky-100 rounded-lg p-4 text-center">
-            <img src="/logo.jpg" alt="Marine & Geo" className="w-20 h-20 mx-auto object-contain" />
-            <div className="text-[10px] text-slate-500 mt-2 font-medium tracking-wider">MARINE &amp; GEO</div>
-            <div className="text-[9px] text-slate-400 mt-0.5">Surveying the Future</div>
-          </div>
-        </aside>
-
-        <main className="col-span-10 space-y-3">
-          <div className="bg-white border border-sky-100 rounded-lg p-3 flex items-center gap-3">
-            <div className="flex-1 flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded border border-slate-200">
-              <Search size={14} className="text-slate-400" />
-              <input type="text" placeholder="과거 일지 검색 (예: 신안 케이윈드파워)" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="flex-1 bg-transparent text-sm outline-none" />
-              {searchQuery && (
-                <button onClick={() => setSearchQuery("")} className="text-slate-400 hover:text-slate-600">
-                  <X size={14} />
-                </button>
-              )}
-            </div>
-            <div className="flex items-center gap-2 px-3 py-1.5 border border-sky-100 rounded">
-              <Filter size={13} className="text-slate-400" />
-              <select value={authorFilter} onChange={(e) => setAuthorFilter(e.target.value)} className="bg-transparent text-sm outline-none cursor-pointer">
-                {authors.map((a) => <option key={a} value={a}>{a}</option>)}
-              </select>
-            </div>
-          </div>
-
-          <div className="text-xs text-slate-500 px-1">
-            {loading ? "불러오는 중..." : filteredEntries.length + "개의 일지"}
-            {newEntry && <span className="text-amber-600 font-semibold"> · 새 일지 작성 중</span>}
-            {searchQuery && <span> · "{searchQuery}" 검색 결과</span>}
-          </div>
-
-          {loading && (
-            <div className="bg-white border border-sky-100 rounded-lg p-12 text-center text-slate-500 text-sm flex items-center justify-center gap-2">
-              <Loader2 size={16} className="animate-spin" />
-              데이터를 불러오는 중...
-            </div>
+    <div className="app-shell" style={{ "--brand-navy": BRAND.navy, "--brand-blue": BRAND.blue, "--brand-accent": BRAND.accent }}>
+      <Sidebar view={view} setView={setView} stats={stats} centerStats={centerStats} currentUser={currentUser} onLogout={handleLogout} />
+      <div className="app-main">
+        <Topbar view={view} stats={stats} />
+        <main className="content-area">
+          {view === "dashboard" && (
+            <Dashboard
+              entries={entries}
+              journalStats={stats}
+              centerTasks={centerTasks}
+              leaveRequests={leaveRequests}
+              setView={setView}
+            />
           )}
-
-          <div className="space-y-3">
-            {/* 새 일지 (작성 중) - 항상 맨 위 */}
-            {newEntry && (
-              <EntryCard
-                key="NEW"
-                entry={newEntry}
-                isExpanded={true}
-                isCurrent={false}
-                isNew={true}
-                onToggle={() => {}}
-                onSave={handleSave}
-                onDelete={handleDelete}
-                onCancel={handleCancelNew}
+          {view === "journal" && (
+            <JournalView
+              loading={loading}
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+              authorFilter={authorFilter}
+              setAuthorFilter={setAuthorFilter}
+              authors={authors}
+              filteredEntries={filteredEntries}
+              newEntry={newEntry}
+              onNewEntry={handleNewEntry}
+              onCancelNew={() => setNewEntry(null)}
+              onSave={handleSave}
+              onDelete={requestDelete}
+              onRefresh={fetchEntries}
+              onNotice={showNotice}
+            />
+          )}
+          {view === "leave" && (
+            <section className="module-frame">
+              <LeaveView />
+            </section>
+          )}
+          {view === "center" && (
+            <section className="module-frame">
+              <CenterView
+                tasks={centerTasks}
+                loading={centerLoading}
+                onReload={fetchCenter}
+                onNotice={showNotice}
               />
-            )}
-
-            {/* 기존 일지들 */}
-            {filteredEntries.map((entry) => {
-              const isExpanded = expandedId === entry.id;
-              const isCurrent = isThisWeek(entry.thisWeekDate);
-
-              return (
-                <EntryCard
-                  key={entry.id}
-                  entry={entry}
-                  isExpanded={isExpanded}
-                  isCurrent={isCurrent}
-                  isNew={false}
-                  onToggle={() => setExpandedId(isExpanded ? null : entry.id)}
-                  onSave={handleSave}
-                  onDelete={handleDelete}
-                />
-              );
-            })}
-          </div>
-
-          {!loading && filteredEntries.length === 0 && !newEntry && (
-            <div className="bg-white border border-sky-100 rounded-lg p-12 text-center text-slate-500 text-sm">
-              {entries.length === 0 ? "아직 작성된 일지가 없습니다. 우측 상단 '새 일지' 버튼을 눌러 시작하세요!" : "검색 결과가 없습니다."}
-            </div>
+            </section>
           )}
         </main>
       </div>
-      )}
+      <Toast notice={notice} onClose={() => setNotice(null)} />
+      <ConfirmDialog confirm={confirm} onCancel={() => setConfirm(null)} onConfirm={confirmDelete} />
     </div>
   );
+}
+
+export default function App() {
+  const [session, setSession] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (active) { setSession(data.session); setAuthReady(true); }
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
+    return () => { active = false; sub.subscription.unsubscribe(); };
+  }, []);
+
+  if (!authReady) {
+    return (
+      <div className="login-shell" style={{ "--brand-navy": BRAND.navy, "--brand-blue": BRAND.blue, "--brand-accent": BRAND.accent }}>
+        <div className="login-loading"><Loader2 size={20} className="spin" /> 불러오는 중…</div>
+      </div>
+    );
+  }
+  if (!session) return <LoginScreen />;
+  return <Workspace session={session} />;
 }

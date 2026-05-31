@@ -903,6 +903,7 @@ function CalendarGrid({ cells, events, onCellClick, onEventClick, today }) {
                        background: cell.other ? "#fafbfc" : isToday ? THEME.accentSoft : "#fff",
                        opacity: cell.other ? 0.45 : 1,
                        padding: "8px 8px 0 8px",
+                       boxShadow: isToday ? `inset 0 0 0 2px ${THEME.accent}` : "none",
                      }}>
                   <div className="flex items-center justify-between">
                     <span className={"text-[15px] " + (isToday ? "font-bold" : "font-semibold")}
