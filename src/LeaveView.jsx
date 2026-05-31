@@ -5,6 +5,7 @@ import {
   ChevronDown, ChevronUp, Users, Link2,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
+import { ErpHero } from "./ErpHero.jsx";
 
 // ─────────────────────────────────────────────────────────────
 // 회사 디자인 토큰 (마린엔지오 navy/blue 표준)
@@ -309,6 +310,11 @@ export default function LeaveView() {
 
   return (
     <div className="px-6 py-6">
+      <ErpHero
+        title="휴가·출장"
+        meta={`${year}년 ${month + 1}월 · 전체 ${requests.length}건 · MGEO 캘린더 연동`}
+        tags={["연차·출장", "MGEO 캘린더", "구글 연동(버튼)"]}
+      />
       {/* ── 달력 헤더 ───────────────────────────── */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
@@ -488,7 +494,13 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents, onHolidays
         if (resp.error) {
           // silent 시도(prompt:'') 실패는 조용히 처리, 명시적 클릭(prompt:'consent') 실패만 표시
           if (resp.error !== "popup_closed_by_user") {
-            setMsg({ kind: "err", text: `OAuth 실패: ${resp.error}` });
+            const origin = /origin|idpiframe|redirect/i.test(resp.error || "");
+            setMsg({
+              kind: "err",
+              text: origin
+                ? "현재 접속 주소가 Google OAuth 승인 origin에 등록되어 있지 않아 캘린더 연동을 시작할 수 없습니다. Google Cloud Console > OAuth Client > Authorized JavaScript origins 에 현재 주소를 추가하세요."
+                : `OAuth 실패: ${resp.error}`,
+            });
           }
           setBusy(false); return;
         }
@@ -500,11 +512,8 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents, onHolidays
         setToken(newToken);
       },
     });
-    // init 직후 silent 토큰 시도 — 이미 동의한 사용자면 popup 없이 자동 발급
-    const stored = loadStoredToken();
-    if (!stored || stored.expires_at <= Date.now() + 60_000) {
-      try { tokenClientRef.current.requestAccessToken({ prompt: "" }); } catch {}
-    }
+    // 진입 시 자동 OAuth 시도 제거 (포테토뭉 권고) — origin_mismatch/팝업 방지.
+    // 사용자가 연동 버튼을 눌렀을 때만 토큰을 요청한다. 저장된 유효 토큰이 있으면 아래 effect가 사용.
   }, [gisReady, clientId]);
 
   // 토큰 만료 5분 전 자동 silent refresh
@@ -722,7 +731,8 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents, onHolidays
                  text: `자동 동기화: 신규 ${pushed} · 갱신 ${updated}${errors ? " · 실패 " + errors : ""}` });
       }
     } else {
-      alert(`MGEO 캘린더 동기화 완료\n신규 ${pushed}건 · 갱신 ${updated}건 · 실패 ${errors}건`);
+      setMsg({ kind: errors ? "err" : "ok",
+               text: `MGEO 동기화 완료 · 신규 ${pushed} · 갱신 ${updated}${errors ? " · 실패 " + errors : ""}` });
     }
     if (onSyncDone && (pushed || updated)) onSyncDone();
   }
@@ -1095,8 +1105,8 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
   );
 
   async function handleSave() {
-    if (!author.trim()) { alert("성명을 입력해 주세요."); return; }
-    if (!selectedType) { alert("휴가 종류를 선택해 주세요."); return; }
+    if (!author.trim()) { setErrText("성명을 입력해 주세요."); return; }
+    if (!selectedType) { setErrText("휴가 종류를 선택해 주세요."); return; }
     setSaving(true);
 
     const payload = {
@@ -1129,7 +1139,7 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
       const r = await supabase.from("leave_requests").insert([payload]).select().single();
       savedRow = r.data; error = r.error;
     }
-    if (error) { setSaving(false); alert("저장 실패: " + error.message); return; }
+    if (error) { setSaving(false); setErrText("저장 실패: " + error.message); return; }
 
     // 출장 + 김찬수·최승표면 보상 누적 재계산 (잔여 연차에 +N 누적)
     if (savedRow && selectedType?.name === "출장" && COMPENSATORY_TARGETS.has(savedRow.author)) {
@@ -1143,9 +1153,17 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
     onSaved();
   }
 
-  async function handleDelete() {
+  // 브라우저 confirm/alert 금지 — 회사 인라인 확인 모달 + 인라인 에러 사용
+  const [confirmKind, setConfirmKind] = useState(null); // null | 'del' | 'delExt'
+  const [errText, setErrText] = useState("");
+
+  function handleDelete() {
     if (!isEdit) return;
-    if (!confirm("정말 이 신청을 삭제하시겠습니까?")) return;
+    setErrText("");
+    setConfirmKind("del");
+  }
+  async function doDelete() {
+    setConfirmKind(null);
     setSaving(true);
     if (existing?.google_calendar_event_id) {
       await tryDeleteCalendarEvent(existing.google_calendar_event_id);
@@ -1159,17 +1177,19 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
       catch (e) { console.warn("보상 누적 재계산 실패:", e); }
     }
     setSaving(false);
-    if (error) { alert("삭제 실패: " + error.message); return; }
+    if (error) { setErrText("삭제 실패: " + error.message); return; }
     onSaved();
   }
 
-  async function handleDeleteExternal() {
+  function handleDeleteExternal() {
+    if (!ext) return;
+    setErrText("");
+    setConfirmKind("delExt");
+  }
+  async function doDeleteExternal() {
+    setConfirmKind(null);
     if (!ext) return;
     const ids = (ext._mergedIds && ext._mergedIds.length) ? ext._mergedIds : [ext.id];
-    const msg = ids.length > 1
-      ? `이 일정은 ${ids.length}개의 캘린더 이벤트로 구성되어 있습니다.\n모두 MGEO 캘린더에서 영구 삭제됩니다. 계속하시겠습니까?`
-      : `이 이벤트를 MGEO 캘린더에서 영구 삭제합니다. 계속하시겠습니까?`;
-    if (!confirm(msg)) return;
     setSaving(true);
     const okIds = [], failIds = [];
     for (const id of ids) {
@@ -1178,13 +1198,19 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
     }
     setSaving(false);
     if (failIds.length) {
-      alert(`삭제 실패 ${failIds.length}건. 토큰 만료 또는 권한 부족일 수 있습니다.\n(성공: ${okIds.length}건)`);
+      setErrText(`캘린더 삭제 실패 ${failIds.length}건 (성공 ${okIds.length}건). 토큰 만료 또는 권한 부족일 수 있습니다.`);
     }
     if (okIds.length) onExternalDeleted?.(okIds);
-    onClose();
+    if (!failIds.length) onClose();
   }
+  const delExtMsg = ext
+    ? (((ext._mergedIds && ext._mergedIds.length) ? ext._mergedIds.length : 1) > 1
+        ? `이 일정은 ${ext._mergedIds.length}개의 캘린더 이벤트로 구성되어 있습니다. 모두 MGEO 캘린더에서 영구 삭제됩니다.`
+        : "이 이벤트를 MGEO 캘린더에서 영구 삭제합니다.")
+    : "";
 
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
          style={{ background: "rgba(15, 23, 42, 0.5)" }}
          onClick={onClose}>
@@ -1202,6 +1228,12 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
 
         {/* 본문 */}
         <div className="p-5 space-y-3 text-sm">
+          {errText && (
+            <div className="rounded-md p-3 text-xs"
+                 style={{ background: "#fef2f2", border: "1px solid #fca5a5", color: "#7f1d1d" }}>
+              {errText}
+            </div>
+          )}
           {ext && (
             <div className="rounded-md p-3 text-xs"
                  style={{ background: "#fff7e6", border: "1px solid #f3c98a", color: "#7a4a00" }}>
@@ -1392,5 +1424,25 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
         </div>
       </div>
     </div>
+
+    {confirmKind && (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+           style={{ background: "rgba(15,23,42,.55)" }} onClick={() => setConfirmKind(null)}>
+        <div onClick={(e) => e.stopPropagation()}
+             style={{ background: "#fff", borderRadius: 12, padding: 20, width: "min(420px,100%)", boxShadow: "0 18px 50px rgba(0,0,0,.3)" }}>
+          <h3 style={{ margin: 0, color: THEME.navy, fontSize: 17, fontWeight: 800 }}>삭제할까요?</h3>
+          <p style={{ margin: "8px 0 0", color: THEME.sub, fontSize: 13, lineHeight: 1.55 }}>
+            {confirmKind === "del" ? "이 신청을 삭제합니다. 복구하기 어렵습니다." : delExtMsg}
+          </p>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+            <button onClick={() => setConfirmKind(null)}
+                    style={{ padding: "8px 16px", borderRadius: 8, border: `1px solid ${THEME.line}`, background: "#fff", color: THEME.sub, fontWeight: 600, cursor: "pointer" }}>취소</button>
+            <button onClick={confirmKind === "del" ? doDelete : doDeleteExternal}
+                    style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #dc2626", background: "#dc2626", color: "#fff", fontWeight: 700, cursor: "pointer" }}>삭제</button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

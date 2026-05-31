@@ -27,6 +27,7 @@ import {
 import { supabase } from "./supabaseClient";
 import LeaveView from "./LeaveView.jsx";
 import CenterView from "./CenterView.jsx";
+import { ErpHero } from "./ErpHero.jsx";
 
 const BRAND = {
   navy: "#1f3a5f",
@@ -419,6 +420,17 @@ function JournalView({ loading, searchQuery, setSearchQuery, authorFilter, setAu
 
   return (
     <div className="journal-layout">
+      <ErpHero
+        title="주간업무"
+        meta={`주간 업무일지 · 작성자 ${authors.length > 1 ? authors.length - 1 : 0}명 · 총 ${filteredEntries.length}건`}
+        tags={["이번 주", "자동저장", "Supabase 연결"]}
+        actions={(
+          <>
+            <button onClick={() => onRefresh(false)}><RefreshCw size={14} /> 새로고침</button>
+            <button onClick={onNewEntry} disabled={newEntry !== null}><Plus size={14} /> 새 업무일지</button>
+          </>
+        )}
+      />
       <div className="toolbar panel">
         <div className="search-box">
           <Search size={17} />
@@ -508,11 +520,11 @@ function Sidebar({ view, setView, stats, centerStats, currentUser, onLogout }) {
         <div className="side-user-info">
           <span
             className="side-user-avatar"
-            style={{ background: avatarFor(currentUser).bg, color: avatarFor(currentUser).text }}
+            style={{ backgroundColor: avatarFor(currentUser).bg, color: avatarFor(currentUser).text }}
           >
-            {(currentUser || "?").slice(0, 1)}
+            <span className="ava-ch">{(currentUser || "?").slice(0, 1)}</span>
           </span>
-          <div>
+          <div className="side-user-text">
             <strong>{currentUser}</strong>
             <span>로그인됨</span>
           </div>
@@ -523,10 +535,14 @@ function Sidebar({ view, setView, stats, centerStats, currentUser, onLogout }) {
       <nav className="side-nav">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
+          const count = item.id === "journal" ? stats.totalEntries
+            : item.id === "center" ? centerStats.needCheck
+            : 0;
           return (
             <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>
               <Icon size={17} />
               <span>{item.label}</span>
+              {count > 0 && <span className="side-nav-count">{count}</span>}
             </button>
           );
         })}
@@ -759,18 +775,24 @@ function Dashboard({ entries, journalStats, centerTasks, leaveRequests, setView 
 
   return (
     <div className="dashboard">
-      {/* ── 상단 navy 요약 띠 ── */}
-      <div className="dash-strip">
-        <div>
-          <p className="dash-strip-eyebrow">MARINE &amp; GEO · {todayLabel()}</p>
-          <p className="dash-strip-msg">
-            마감 초과 {kpi.overdue} · 센터 긴급 {kpi.urgent} · 주간업무 {kpi.submitted}/{kpi.expected} · 이번 주 부재 {kpi.absentWeek}
-          </p>
-        </div>
-        <span className={`badge ${kpi.overdue > 0 ? "red" : kpi.urgent > 0 ? "amber" : "green"}`}>
-          {kpi.overdue > 0 ? `마감 초과 ${kpi.overdue}건` : kpi.urgent > 0 ? `처리 대기 ${kpi.urgent}건` : "이상 없음"}
-        </span>
-      </div>
+      {/* ── Project Desk 히어로 ── */}
+      <ErpHero
+        title="대시보드"
+        meta={`통합 운영 현황 · 기준일 ${todayLabel()} · 마감 초과 ${kpi.overdue} · 센터 긴급 ${kpi.urgent} · 주간업무 ${kpi.submitted}/${kpi.expected} · 이번 주 부재 ${kpi.absentWeek}`}
+        tags={[
+          "운영 중",
+          "이번 주",
+          "Supabase 연결",
+          ...(kpi.overdue > 0 ? [{ label: `마감 초과 ${kpi.overdue}`, hot: true }] : []),
+        ]}
+        actions={(
+          <>
+            <button onClick={() => setView("journal")}><FileText size={14} /> 주간업무</button>
+            <button onClick={() => setView("center")}><BriefcaseBusiness size={14} /> 해양벤처센터</button>
+            <button onClick={() => setView("leave")}><Plane size={14} /> 휴가·출장</button>
+          </>
+        )}
+      />
 
       {/* ── KPI 스트립 ── */}
       <div className="dash-kpis">

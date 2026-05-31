@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { gcalReady, createAllDayEvent } from "./gcal";
+import { ErpHero } from "./ErpHero.jsx";
 
 // ── 표준 분류·상태·우선순위 (포테토뭉 합의 6/5/3종) ──
 const CATEGORIES = ["공공요금", "제출업무", "지원사업", "교육·시설", "입주·계약"];
@@ -352,6 +353,21 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
 
   return (
     <div className="journal-layout">
+      <ErpHero
+        title="해양벤처진흥센터"
+        meta={`센터 행정 업무판 · 진행 ${activeTasks.length}건 · 완료·종료 ${doneTasks.length}건`}
+        tags={[
+          "수동 업무판",
+          ...(counters.dueSoon > 0 ? [{ label: `마감 임박 ${counters.dueSoon}`, hot: true }] : []),
+          "Gmail 연동 대기",
+        ]}
+        actions={(
+          <>
+            <button onClick={() => reload()}><RefreshCw size={14} /> 새로고침</button>
+            <button onClick={openNew}><Plus size={14} /> 새 업무</button>
+          </>
+        )}
+      />
       {/* 카운터 — 미니 KPI */}
       <div className="center-kpis">
         <div className="center-kpi tone-red">
@@ -551,7 +567,7 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
         <div className="modal-backdrop" role="presentation" onClick={() => !completing && setCompleteTarget(null)}>
           <div className="center-complete panel" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
             <div className="center-modal-head">
-              <h3>완료 처리</h3>
+              <h3><CheckCircle2 size={17} /> 완료 처리</h3>
               <button className="icon-btn" onClick={() => !completing && setCompleteTarget(null)} aria-label="닫기"><X size={16} /></button>
             </div>
             <div className="center-complete-body">
