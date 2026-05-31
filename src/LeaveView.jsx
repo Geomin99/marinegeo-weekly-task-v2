@@ -993,7 +993,7 @@ function CalendarGrid({ cells, events, onCellClick, onEventClick, today }) {
                   : `${isTrip ? "✈ " : ""}${siteTime ? `🕐 ${siteTime} ` : ""}${ev.author} · ${ev.leave_type_name}${ev.destination ? " · " + ev.destination : ""}`;
                 // 색상 전략: 진한 배경 + 흰 글자 (모든 막대 통일). pending은 dashed border로 구분.
                 const bg = isExternal ? (isCenterEvt ? "#7986cb" : "#64748b") : c.bg;
-                const fg = "#ffffff";
+                const fg = isPast ? "rgba(255,255,255,0.72)" : "#ffffff";  // 지나간 일정은 회색톤
                 return (
                   <div key={(ev.id || "x") + "-" + i + "-" + wi}
                        onClick={(e) => { e.stopPropagation(); onEventClick(ev); }}
