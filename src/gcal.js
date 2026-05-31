@@ -36,8 +36,13 @@ function ymd(d) {
   return `${y}-${m}-${da}`;
 }
 
+// 해양벤처진흥센터 일정 식별 색 (Google colorId 1 = Lavender 연보라).
+// 토뭉이님 지정 2026-05-31 · 포테토뭉 검토. [해양벤처진흥센터]/[센터완료] 계열 공통.
+export const CENTER_EVENT_COLOR_ID = "1";
+
 // MGEO 공유 캘린더에 종일 이벤트 1일 생성. 자동 호출 금지 — 사용자 명시 동의 시에만 호출할 것.
-export async function createAllDayEvent({ summary, description, date }) {
+// colorId 지정 시 이벤트 색 부여(센터 일정 식별용).
+export async function createAllDayEvent({ summary, description, date, colorId }) {
   const token = loadGcalToken();
   if (!token) return { ok: false, reason: "no_token" };
   const calId = loadGcalCalendarId();
@@ -50,6 +55,7 @@ export async function createAllDayEvent({ summary, description, date }) {
       description: description || "",
       start: { date },
       end: { date: ymd(end) },
+      ...(colorId ? { colorId } : {}),
     };
     const r = await fetch(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`,

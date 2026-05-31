@@ -20,7 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
-import { gcalReady, createAllDayEvent } from "./gcal";
+import { gcalReady, createAllDayEvent, CENTER_EVENT_COLOR_ID } from "./gcal";
 import { ErpHero } from "./ErpHero.jsx";
 
 // ── 표준 분류·상태·우선순위 (포테토뭉 합의 6/5/3종) ──
@@ -266,6 +266,7 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
         summary: `[센터완료] ${row.title}`,
         description: `해양벤처진흥센터 업무 완료 기록\n분류: ${row.category}${row.assignee ? ` · 담당: ${row.assignee}` : ""}`,
         date: completeDate,
+        colorId: CENTER_EVENT_COLOR_ID,
       });
       if (res.ok) {
         patch.google_calendar_event_id = res.eventId;
