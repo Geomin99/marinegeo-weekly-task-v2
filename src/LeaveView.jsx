@@ -73,6 +73,35 @@ function ymd(d) {
   return `${y}-${m}-${day}`;
 }
 
+// 캘린더에 실제 반영되는 필드만 모아 signature 생성.
+// DB의 calendar_sync_signature 와 다르면 dirty(재반영 대상)로 판단한다.
+function calendarSignature(req) {
+  return JSON.stringify([
+    req.author ?? "",
+    req.leave_type_name ?? "",
+    req.status ?? "",
+    req.start_date ?? "",
+    req.end_date ?? "",
+    req.is_all_day === false ? 0 : 1,
+    req.start_time ?? "",
+    req.end_time ?? "",
+    req.destination ?? "",
+    req.trip_purpose ?? "",
+    req.companions ?? "",
+    req.memo ?? "",
+  ]);
+}
+
+// 동기화가 필요한 상태인지: 활성 건은 event 없음 or signature 불일치, 취소/반려 건은 event 잔존
+function needsCalendarSync(req) {
+  const active = req.status !== "rejected" && req.status !== "cancelled";
+  if (active) {
+    return !req.google_calendar_event_id ||
+           req.calendar_sync_signature !== calendarSignature(req);
+  }
+  return !!req.google_calendar_event_id; // 취소/반려인데 캘린더에 남아 있으면 삭제 대상
+}
+
 function daysBetween(start, end) {
   if (!end || end === start) return 1;
   const s = new Date(start), e = new Date(end);
@@ -665,14 +694,36 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents, onHolidays
   }
 
   async function syncToCalendar(opts = {}) {
-    const { silent = false, onlyNew = false } = opts;
+    const { silent = false } = opts;
     if (!calendarId || !token || !requests?.length) return;
     if (!silent) { setBusy(true); setMsg(null); }
-    let pushed = 0, updated = 0, errors = 0;
+    let pushed = 0, updated = 0, removed = 0, errors = 0;
+    const calUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
+    const authHeaders = { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json" };
+    // 구글 반영 성공 시에만 synced 상태 기록. 실패 시 signature 미갱신 → 다음 sync에서 재시도(누락 방지).
+    const markSynced = (id, sig, extra = {}) =>
+      supabase.from("leave_requests")
+        .update({ calendar_synced_at: new Date().toISOString(), calendar_sync_signature: sig, calendar_sync_error: null, ...extra })
+        .eq("id", id);
+
     for (const req of requests) {
+      const sig = calendarSignature(req);
+      const active = req.status !== "rejected" && req.status !== "cancelled";
       try {
-        if (req.status === "rejected" || req.status === "cancelled") continue;
-        if (onlyNew && req.google_calendar_event_id) continue;  // 신규만 push
+        // 취소·반려 → 캘린더 이벤트 삭제 (PATCH로 [취소됨] 남기지 않음)
+        if (!active) {
+          if (!req.google_calendar_event_id) continue;
+          const r = await fetch(`${calUrl}/${req.google_calendar_event_id}`, { method: "DELETE", headers: authHeaders });
+          if (r.ok || r.status === 404 || r.status === 410) {  // 이미 삭제됨도 성공 처리
+            await markSynced(req.id, sig, { google_calendar_event_id: null });
+            removed++;
+          } else errors++;
+          continue;
+        }
+
+        // 활성 건: signature 동일하면 skip (이미 최신 반영)
+        if (req.google_calendar_event_id && req.calendar_sync_signature === sig) continue;
+
         const startDate = req.start_date;
         const endDate = req.end_date || req.start_date;
         const summary = `[${req.author}] ${req.leave_type_name || "휴가"}${req.destination ? ` - ${req.destination}` : ""}`;
@@ -698,56 +749,50 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents, onHolidays
                     start: { date: startDate },
                     end:   { date: ymd(endDt) } };
         }
-        const calUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
+
         if (req.google_calendar_event_id) {
+          // 기존 이벤트 수정 (휴가↔출장·날짜·목적지·메모 등 변경 재반영)
           const r = await fetch(`${calUrl}/${req.google_calendar_event_id}`, {
-            method: "PATCH",
-            headers: { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json" },
-            body: JSON.stringify(event),
+            method: "PATCH", headers: authHeaders, body: JSON.stringify(event),
           });
-          if (r.ok) updated++; else errors++;
-        } else {
-          const r = await fetch(calUrl, {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json" },
-            body: JSON.stringify(event),
-          });
-          const data = await r.json();
-          if (data.id) {
-            await supabase.from("leave_requests")
-              .update({ google_calendar_event_id: data.id })
-              .eq("id", req.id);
-            pushed++;
+          if (r.ok) { await markSynced(req.id, sig); updated++; }
+          else if (r.status === 404 || r.status === 410) {
+            // 캘린더에서 사라진 경우 → 새로 생성
+            const r2 = await fetch(calUrl, { method: "POST", headers: authHeaders, body: JSON.stringify(event) });
+            const d2 = await r2.json();
+            if (d2.id) { await markSynced(req.id, sig, { google_calendar_event_id: d2.id }); pushed++; }
+            else errors++;
           } else errors++;
+        } else {
+          // 신규 생성
+          const r = await fetch(calUrl, { method: "POST", headers: authHeaders, body: JSON.stringify(event) });
+          const data = await r.json();
+          if (data.id) { await markSynced(req.id, sig, { google_calendar_event_id: data.id }); pushed++; }
+          else errors++;
         }
       } catch (e) {
         errors++;
       }
     }
     if (!silent) setBusy(false);
+    const detail = `신규 ${pushed} · 갱신 ${updated}${removed ? " · 삭제 " + removed : ""}${errors ? " · 실패 " + errors : ""}`;
     if (silent) {
-      if (pushed || updated || errors) {
-        setMsg({ kind: errors ? "err" : "ok",
-                 text: `자동 동기화: 신규 ${pushed} · 갱신 ${updated}${errors ? " · 실패 " + errors : ""}` });
-      }
+      if (pushed || updated || removed || errors)
+        setMsg({ kind: errors ? "err" : "ok", text: `자동 동기화: ${detail}` });
     } else {
-      setMsg({ kind: errors ? "err" : "ok",
-               text: `MGEO 동기화 완료 · 신규 ${pushed} · 갱신 ${updated}${errors ? " · 실패 " + errors : ""}` });
+      setMsg({ kind: errors ? "err" : "ok", text: `MGEO 동기화 완료 · ${detail}` });
     }
-    if (onSyncDone && (pushed || updated)) onSyncDone();
+    if (onSyncDone && (pushed || updated || removed)) onSyncDone();
   }
 
   const valid = token && token.expires_at > Date.now();
 
-  // 자동 동기화: token+calendarId 있고 아직 push 안 된 신청이 있으면 1.5초 후 silent push
+  // 자동 동기화: token+calendarId 있고 미반영(신규·수정·취소) 건이 있으면 1.5초 후 silent sync
   useEffect(() => {
     if (!valid || !calendarId || !requests?.length) return;
-    const needPush = requests.some(r =>
-      !r.google_calendar_event_id &&
-      r.status !== "rejected" && r.status !== "cancelled"
-    );
-    if (!needPush) return;
-    const t = setTimeout(() => { syncToCalendar({ silent: true, onlyNew: true }); }, 1500);
+    const needSync = requests.some(needsCalendarSync);
+    if (!needSync) return;
+    const t = setTimeout(() => { syncToCalendar({ silent: true }); }, 1500);
     return () => clearTimeout(t);
   }, [valid, calendarId, requests]);
 
