@@ -1054,8 +1054,31 @@ function LoginScreen() {
   );
 }
 
+const VALID_VIEWS = NAV_ITEMS.map((n) => n.id);
+function viewFromHash() {
+  const h = (window.location.hash || "").replace(/^#\/?/, "");
+  return VALID_VIEWS.includes(h) ? h : "dashboard";
+}
+
 function Workspace({ session }) {
-  const [view, setView] = useState("dashboard");
+  // 탭을 URL 해시(#leave 등)에 반영 → 어느 기기·브라우저든 새로고침 시 유지, 북마크·링크 공유 가능
+  const [view, setViewRaw] = useState(viewFromHash);
+  const setView = (v) => {
+    setViewRaw(v);
+    const target = `#${v}`;
+    if (window.location.hash !== target) window.location.hash = target;
+  };
+  // 주소 직접 변경·뒤로가기 시 탭 동기화
+  useEffect(() => {
+    const onHash = () => setViewRaw(viewFromHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  // 첫 진입 시 해시가 비어 있으면 현재 탭으로 채워둠(공유 링크 일관성)
+  useEffect(() => {
+    if (!window.location.hash) window.location.replace(`#${view}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
