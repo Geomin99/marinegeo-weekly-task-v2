@@ -980,6 +980,7 @@ function CalendarGrid({ cells, events, onCellClick, onEventClick, today }) {
                 const isExternal = ev.is_external;
                 // 해양벤처진흥센터 관련 일정은 앱 캘린더에서 연보라로 구분 (그 외 외부일정은 회색)
                 const isCenterEvt = isExternal && ((ev.summary || "").includes("해양벤처진흥센터") || (ev.summary || "").includes("센터완료"));
+                const isPast = ev._end < todayStr;  // 종료일이 오늘 이전 = 지나간 일정 → 일반 글씨
                 const c = isExternal ? null : getAuthorColor(ev.author);
                 const isTrip = ev.leave_type_name === "출장";
                 const isPending = !isExternal && ev.status === "pending";
@@ -1010,7 +1011,7 @@ function CalendarGrid({ cells, events, onCellClick, onEventClick, today }) {
                          border: isPending ? `1.5px dashed rgba(255,255,255,0.55)` : "none",
                          borderLeft: isTrip ? `4px solid ${THEME.warn}` : (isPending ? `1.5px dashed rgba(255,255,255,0.55)` : "none"),
                          fontStyle: isExternal ? "italic" : "normal",
-                         fontWeight: 700,
+                         fontWeight: isPast ? 400 : 700,
                          letterSpacing: "-0.2px",
                        }}
                        title={isExternal
