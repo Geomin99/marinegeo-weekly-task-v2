@@ -32,6 +32,7 @@ import LeaveView from "./LeaveView.jsx";
 import CenterView from "./CenterView.jsx";
 import InboxView from "./InboxView.jsx";
 import VoiceLogView from "./VoiceLogView.jsx";
+import MeetingView from "./MeetingView.jsx";
 import { ErpHero } from "./ErpHero.jsx";
 
 const BRAND = {
@@ -565,6 +566,10 @@ function Sidebar({ view, setView, stats, centerStats, currentUser, onLogout, isO
             {voiceCount > 0 && <span className="side-nav-count">{voiceCount}</span>}
           </button>
         )}
+        <button className={view === "meeting" ? "active" : ""} onClick={() => setView("meeting")}>
+          <Users size={17} />
+          <span>회의록</span>
+        </button>
       </nav>
 
       <section className="panel compact side-summary">
@@ -1130,7 +1135,7 @@ function LoginScreen() {
   );
 }
 
-const VALID_VIEWS = [...NAV_ITEMS.map((n) => n.id), "inbox", "voice"];
+const VALID_VIEWS = [...NAV_ITEMS.map((n) => n.id), "inbox", "voice", "meeting"];
 function viewFromHash() {
   const h = (window.location.hash || "").replace(/^#\/?/, "");
   return VALID_VIEWS.includes(h) ? h : "dashboard";
@@ -1514,6 +1519,9 @@ function Workspace({ session }) {
           )}
           {view === "voice" && isOwner && (
             <VoiceLogView logs={voiceLogs} loading={false} onReload={fetchVoice} onNotice={showNotice} ownerId={session?.user?.id} />
+          )}
+          {view === "meeting" && (
+            <MeetingView session={session} viewer={viewerForSession(session)} onNotice={showNotice} />
           )}
         </main>
       </div>
