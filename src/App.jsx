@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { gcalReady, syncLeaveRequests } from "./gcal";
 import {
   AlertCircle,
   Archive,
@@ -629,7 +630,7 @@ function leaveOverlaps(r, a, b) {
   return s && e && s <= b && e >= a;
 }
 
-function Dashboard({ entries, journalStats, centerTasks, leaveRequests, setView }) {
+function Dashboard({ entries, journalStats, centerTasks, leaveRequests, setView, onTrigger, triggering }) {
   const today = useMemo(() => startOfToday(), []);
   const weekStart = useMemo(() => {
     const d = new Date(today);
@@ -787,6 +788,10 @@ function Dashboard({ entries, journalStats, centerTasks, leaveRequests, setView 
         ]}
         actions={(
           <>
+            <button className="erp-act-primary" onClick={onTrigger} disabled={triggering}
+                    title="캘린더 동기화 + 전체 데이터 새로고침">
+              <RefreshCw size={14} className={triggering ? "erp-spin" : ""} /> {triggering ? "동기화 중…" : "동기화"}
+            </button>
             <button onClick={() => setView("journal")}><FileText size={14} /> 주간업무</button>
             <button onClick={() => setView("center")}><BriefcaseBusiness size={14} /> 해양벤처센터</button>
             <button onClick={() => setView("leave")}><Plane size={14} /> 휴가·출장</button>
@@ -1177,6 +1182,38 @@ function Workspace({ session }) {
     fetchEntries(true);
   }, [fetchEntries]);
 
+  // 대시보드 트리거: 누를 때마다 캘린더 동기화 + 전체 데이터 새로고침 (on-demand)
+  const [triggering, setTriggering] = useState(false);
+  const runTrigger = useCallback(async () => {
+    setTriggering(true);
+    try {
+      let cal = null;
+      if (gcalReady()) {
+        // 동기화엔 전체 컬럼 필요(서명·event id) → 별도 풀로드
+        const { data } = await supabase
+          .from("leave_requests")
+          .select("*")
+          .order("start_date", { ascending: true });
+        if (data) cal = await syncLeaveRequests(data);
+      }
+      await Promise.all([fetchEntries(), fetchCenter(), fetchLeave()]);
+      let msg;
+      if (cal && cal.ok) {
+        msg = `동기화 완료 · 캘린더 신규 ${cal.pushed}·갱신 ${cal.updated}` +
+              `${cal.removed ? `·삭제 ${cal.removed}` : ""}${cal.errors ? `·실패 ${cal.errors}` : ""} · 데이터 최신화`;
+      } else if (gcalReady()) {
+        msg = "동기화 완료 · 데이터 최신화";
+      } else {
+        msg = "데이터 최신화 완료 (구글 미연동 — 휴가·출장 탭에서 연동하면 캘린더도 함께 동기화)";
+      }
+      showNotice(msg, "success");
+    } catch (e) {
+      showNotice(`동기화 중 오류: ${e.message}`, "error");
+    } finally {
+      setTriggering(false);
+    }
+  }, [fetchEntries, fetchCenter, fetchLeave, showNotice]);
+
   async function handleSave(id, data, isNew) {
     if (isNew) {
       const { data: inserted, error } = await supabase.from("journal_entries").insert([{
@@ -1327,6 +1364,8 @@ function Workspace({ session }) {
               centerTasks={centerTasks}
               leaveRequests={leaveRequests}
               setView={setView}
+              onTrigger={runTrigger}
+              triggering={triggering}
             />
           )}
           {view === "journal" && (

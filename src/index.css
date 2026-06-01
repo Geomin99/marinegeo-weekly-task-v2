@@ -1493,6 +1493,12 @@ button.brand-lockup:hover {
 .erp-hero-actions { display: flex; gap: 7px; margin-top: 14px; flex-wrap: wrap; }
 .erp-hero-actions button { background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.24); color: #fff; border-radius: 8px; padding: 7px 13px; font-size: 12.5px; font-weight: 700; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; transition: background .13s; }
 .erp-hero-actions button:hover { background: rgba(255,255,255,.22); border-color: rgba(255,255,255,.36); }
+/* 대시보드 동기화 트리거 — 주 액션 강조 + 회전 아이콘 */
+.erp-hero-actions .erp-act-primary { background: #fff; color: #0b3a5f; border-color: #fff; font-weight: 800; }
+.erp-hero-actions .erp-act-primary:hover { background: #eaf2fb; border-color: #fff; }
+.erp-hero-actions .erp-act-primary:disabled { opacity: .72; cursor: default; }
+@keyframes erp-spin { to { transform: rotate(360deg); } }
+.erp-spin { animation: erp-spin .9s linear infinite; }
 
 /* KPI 카드 — Project Desk j-kpi (흰 그라데이션 + quarter-circle accent) */
 .kpi-card { background: linear-gradient(145deg, #fff, #F8FBFF); border: 1px solid #E3EDF7; border-radius: 16px; box-shadow: 0 10px 26px rgba(15,23,42,.07); overflow: hidden; }
