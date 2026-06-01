@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { ExternalLink, CheckCircle2, Archive, RotateCcw, Inbox, Clock } from "lucide-react";
+import { useState, useRef } from "react";
+import { ExternalLink, CheckCircle2, Archive, RotateCcw, Inbox, Clock, Mail } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { ErpHero } from "./ErpHero.jsx";
 
@@ -82,8 +82,37 @@ function DraftCard({ d, busy, onStatus }) {
   );
 }
 
-export default function InboxView({ drafts, onReload, onNotice }) {
+export default function InboxView({ drafts, onReload, onNotice, ownerId }) {
   const [busyId, setBusyId] = useState(null);
+  const [scan, setScan] = useState(null);
+  const pollRef = useRef(null);
+
+  async function requestScan() {
+    try {
+      const { data: active } = await supabase.from("scan_requests")
+        .select("*").in("status", ["pending", "running"]).order("requested_at", { ascending: false }).limit(1);
+      if (active && active.length) { setScan(active[0]); pollScan(active[0].id); onNotice?.("이미 메일 분석이 진행 중입니다.", "info"); return; }
+      const { data, error } = await supabase.from("scan_requests")
+        .insert({ owner: ownerId, requested_by: ownerId, scope: "both" }).select("*").single();
+      if (error) { onNotice?.(`요청 실패: ${error.message}`, "error"); return; }
+      setScan(data); onNotice?.("메일 분석 요청됨 — 잠시 후 반영됩니다.", "success"); pollScan(data.id);
+    } catch (e) { onNotice?.(`요청 오류: ${e.message}`, "error"); }
+  }
+  function pollScan(id) {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      const { data } = await supabase.from("scan_requests").select("*").eq("id", id).maybeSingle();
+      if (!data) return;
+      setScan(data);
+      if (data.status === "done" || data.status === "failed") {
+        clearInterval(pollRef.current); pollRef.current = null;
+        if (data.status === "done") { onReload?.(); onNotice?.(`분석 완료 · 센터 ${data.center_created_count} · 받은편지함 ${data.inbox_draft_created_count}`, "success"); }
+        else onNotice?.(`분석 실패: ${data.error_message || "다시 시도"}`, "error");
+        setTimeout(() => setScan(null), 5000);
+      }
+    }, 3000);
+  }
+  const scanning = scan && (scan.status === "pending" || scan.status === "running");
   const list = (drafts || []).filter((d) => !d.deleted_at);
   const open = list.filter((d) => d.status === "needs_review")
     .sort((a, b) => (PRIO_ORDER[a.priority] - PRIO_ORDER[b.priority]) || (a.received_at < b.received_at ? 1 : -1));
@@ -106,7 +135,15 @@ export default function InboxView({ drafts, onReload, onNotice }) {
         title="내 받은편지함 업무"
         meta={`토뭉이님 전용 · 확인필요 ${open.length} · 처리됨 ${handled.length} · 받은편지함 메일 자동 추출`}
         tags={["개인 전용", "메일 자동 추출", ...(open.length > 0 ? [{ label: `확인필요 ${open.length}`, hot: true }] : [])]}
-        actions={<button onClick={onReload}><RotateCcw size={14} /> 새로고침</button>}
+        actions={(
+          <>
+            <button className="erp-act-primary" onClick={requestScan} disabled={scanning}
+                    title="센터·받은편지함 메일을 스캔해 새 업무 초안을 만듭니다">
+              <Mail size={14} className={scanning ? "erp-spin" : ""} /> {scanning ? (scan.status === "running" ? "분석 중…" : "요청됨…") : "메일 분석"}
+            </button>
+            <button onClick={onReload}><RotateCcw size={14} /> 새로고침</button>
+          </>
+        )}
       />
 
       <div className="px-1 py-4">

@@ -1478,7 +1478,7 @@ function Workspace({ session }) {
             </section>
           )}
           {view === "inbox" && isOwner && (
-            <InboxView drafts={inboxDrafts} onReload={fetchInbox} onNotice={showNotice} />
+            <InboxView drafts={inboxDrafts} onReload={fetchInbox} onNotice={showNotice} ownerId={session?.user?.id} />
           )}
         </main>
       </div>

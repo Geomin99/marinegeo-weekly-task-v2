@@ -12,6 +12,10 @@ function kstToday(): Date {
   const kst = new Date(now.getTime() + 9 * 3600 * 1000);
   return new Date(Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate()));
 }
+async function sha256hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 function ymd(d: Date): string { return d.toISOString().slice(0, 10); }
 function dday(due: string, today: Date): number {
   const d = new Date(due + "T00:00:00Z");
@@ -25,10 +29,11 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    // ── 인증: 공유 시크릿 대조 ──
+    // ── 인증: 공유 시크릿 해시 대조 (DB엔 sha256 해시만 보관) ──
     const provided = req.headers.get("x-reminder-secret") || "";
+    const providedHash = provided ? await sha256hex(provided) : "";
     const { data: cfg } = await sb.from("app_config").select("value").eq("key", "reminder_shared_secret").single();
-    if (!cfg || !provided || provided !== cfg.value) {
+    if (!cfg || !provided || providedHash !== cfg.value) {
       return new Response(JSON.stringify({ error: "forbidden" }), { status: 403, headers: { "Content-Type": "application/json" } });
     }
 
