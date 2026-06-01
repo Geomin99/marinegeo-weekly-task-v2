@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { ErpHero } from "./ErpHero.jsx";
-import { syncLeaveRequests, needsCalendarSync, updateCalendarEvent } from "./gcal";
+import { syncLeaveRequests, needsCalendarSync } from "./gcal";
 
 // ─────────────────────────────────────────────────────────────
 // 회사 디자인 토큰 (마린엔지오 navy/blue 표준)
@@ -1019,7 +1019,6 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
   const [status, setStatus] = useState(existing?.status || (ext ? "approved" : "pending"));
   const [approver, setApprover] = useState(existing?.approver || "");
   const [saving, setSaving] = useState(false);
-  const [eventTitle, setEventTitle] = useState(ext?.summary || "");  // 외부 일정 제목 직접 수정용
 
   const selectedType = useMemo(
     () => leaveTypes.find(t => t.id === Number(leaveTypeId)),
@@ -1050,26 +1049,6 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
     () => (selectedType?.absence_days || 1) * days,
     [selectedType, days]
   );
-
-  // 외부 MGEO 일정을 구글 캘린더처럼 직접 수정(제목·시간·메모) → PATCH
-  async function handleEditEvent() {
-    if (!ext?.id) return;
-    if (!eventTitle.trim()) { setErrText("일정 제목을 입력해 주세요."); return; }
-    setSaving(true);
-    let body;
-    if (!isAllDay && startTime && endTime) {
-      body = { summary: eventTitle, description: memo,
-        start: { dateTime: `${startDate}T${startTime}:00+09:00`, timeZone: "Asia/Seoul" },
-        end:   { dateTime: `${endDate}T${endTime}:00+09:00`,   timeZone: "Asia/Seoul" } };
-    } else {
-      const endDt = new Date(endDate); endDt.setDate(endDt.getDate() + 1);  // all-day end exclusive
-      body = { summary: eventTitle, description: memo, start: { date: startDate }, end: { date: ymd(endDt) } };
-    }
-    const r = await updateCalendarEvent(ext.id, body);
-    setSaving(false);
-    if (r.ok) { onExternalDeleted?.(); onClose(); }
-    else setErrText(`캘린더 수정 실패: ${r.reason}`);
-  }
 
   async function handleSave() {
     if (!author.trim()) { setErrText("성명을 입력해 주세요."); return; }
@@ -1204,11 +1183,9 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
           {ext && (
             <div className="rounded-md p-3 text-xs"
                  style={{ background: "#fff7e6", border: "1px solid #f3c98a", color: "#7a4a00" }}>
-              <div className="font-bold mb-2">📅 MGEO 캘린더 일정</div>
-              <input value={eventTitle} onChange={(e) => setEventTitle(e.target.value)} placeholder="일정 제목"
-                     className="w-full px-2 py-1.5 border rounded mb-2 text-sm"
-                     style={{ borderColor: THEME.line, color: THEME.ink, background: "#fff" }} />
-              <div>제목·시간을 고치고 <b>[일정 수정]</b>을 누르면 구글 캘린더에 바로 반영됩니다. 또는 아래를 채워 <b>[신청]</b>으로 휴가·출장 신청으로 변환할 수 있습니다.</div>
+              <div className="font-bold mb-1">📥 MGEO 캘린더 원본 이벤트를 사이트 신청으로 변환</div>
+              <div>원본: <span className="font-semibold">{ext.summary}</span></div>
+              <div>저장하면 사이트 데이터로 등록 + 캘린더 이벤트도 사이트 형식(`[직원] 종류`)으로 갱신됩니다.</div>
             </div>
           )}
           <div className="grid grid-cols-3 gap-3">
@@ -1384,13 +1361,6 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
                     style={{ borderColor: THEME.line, color: THEME.sub }}>
               취소
             </button>
-            {ext && (
-              <button onClick={handleEditEvent} disabled={saving}
-                      className="px-4 py-2 text-sm font-semibold rounded-md text-white"
-                      style={{ background: THEME.blue }}>
-                일정 수정
-              </button>
-            )}
             <button onClick={handleSave} disabled={saving}
                     className="px-4 py-2 text-sm font-semibold rounded-md text-white"
                     style={{ background: THEME.navy }}>
