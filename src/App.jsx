@@ -57,8 +57,8 @@ const AVATAR_COLORS = [
 const NAV_ITEMS = [
   { id: "dashboard", label: "대시보드", icon: LayoutDashboard },
   { id: "journal", label: "주간업무", icon: FileText },
+  { id: "leave", label: "캘린더", icon: CalendarDays },
   { id: "center", label: "해양벤처진흥센터", icon: BriefcaseBusiness },
-  { id: "leave", label: "휴가·출장", icon: Plane },
 ];
 
 function formatYMD(date) {

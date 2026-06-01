@@ -334,7 +334,7 @@ export default function LeaveView() {
     <CalErrorBoundary>
     <div className="px-6 py-6">
       <ErpHero
-        title="휴가·출장"
+        title="캘린더"
         meta={`${year}년 ${month + 1}월 · 전체 ${requests.length}건 · MGEO 캘린더 연동`}
         tags={["연차·출장", "MGEO 캘린더", "구글 연동(버튼)"]}
       />
