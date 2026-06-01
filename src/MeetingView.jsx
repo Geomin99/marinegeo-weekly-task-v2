@@ -1,7 +1,8 @@
-import { useState, useEffect, useMemo, Component } from "react";
+import { useState, useEffect, useMemo, useRef, Component } from "react";
 import {
   Users, Plus, RotateCcw, Trash2, Pencil, X, Search,
   ClipboardList, CheckSquare, AlertTriangle, ChevronDown, ChevronUp, Lock,
+  Upload, FileAudio, Mic, ClipboardPaste, PencilLine, ShieldAlert,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { ErpHero } from "./ErpHero.jsx";
@@ -22,6 +23,7 @@ class MeetErrorBoundary extends Component {
 
 const MEETING_TYPES = ["내부 회의", "거래처 미팅", "해양벤처진흥센터", "프로젝트 회의", "계약/청구 회의", "기술 검토", "자료처리/해석 회의", "인사/급여", "기타"];
 const METHODS = ["대면", "온라인", "전화", "혼합"];
+const AUDIO_ACCEPT = ".m4a,.mp3,.wav,.webm,.mp4,.mpeg,.mpga,audio/*";
 
 // 상태 7종 (DB enum) · badge 색
 const STATUS = {
@@ -75,6 +77,15 @@ export default function MeetingView({ session, viewer, onNotice }) {
 
   useEffect(() => { reload(); }, []);
 
+  // 전사·요약 진행 중이면 6초마다 자동 갱신 → 회사 PC 워커가 채우면 화면 자동 반영
+  useEffect(() => {
+    const active = list.some(m => m.status === "transcribing" || m.status === "summarized" && !m.summary_text);
+    if (!active) return;
+    const iv = setInterval(() => reload(), 6000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list]);
+
   async function reload() {
     setLoading(true);
     const { data, error } = await supabase.from("meetings").select("*").order("meeting_date", { ascending: false, nullsFirst: false });
@@ -95,10 +106,14 @@ export default function MeetingView({ session, viewer, onNotice }) {
     if (next) loadParticipants(r.id);
   }
 
-  async function saveMeeting(form, editing) {
+  // 입력 3방식 공통 저장. inputType: 'manual' | 'audio' | 'paste'
+  async function saveAny(form, editing, inputType, file) {
     if (!form.title.trim()) { onNotice?.("회의명을 입력하세요.", "error"); return; }
+    if (inputType === "audio" && !editing && !file) { onNotice?.("음성파일을 선택하세요.", "error"); return; }
     setBusy(true);
     try {
+      // 음성=전사 대기, 붙여넣기=원문 직입력, 직접작성=폼 상태
+      const method = editing ? (editing.input_method || "manual") : inputType;
       const payload = {
         title: form.title.trim(),
         meeting_date: form.meeting_date ? new Date(form.meeting_date).toISOString() : null,
@@ -106,34 +121,63 @@ export default function MeetingView({ session, viewer, onNotice }) {
         meeting_method: form.meeting_method || null,
         location: form.location || null,
         visibility: form.visibility || "participants",
-        status: form.status || "draft",
         agenda: lines(form.agenda),
         minutes_text: form.minutes_text || null,
         decisions: lines(form.decisions),
         action_items: lines(form.action_items).map(t => ({ task: t, source: "manual", status: "open" })),
-        follow_up_required: form.status === "follow_up",
         updated_at: new Date().toISOString(),
       };
+      if (editing) {
+        payload.status = form.status || "draft";
+        payload.follow_up_required = form.status === "follow_up";
+      } else if (inputType === "audio") {
+        payload.input_method = "audio"; payload.status = "transcribing";
+      } else if (inputType === "paste") {
+        payload.input_method = "paste"; payload.status = "draft";
+        payload.transcript_text = form.paste_text || null;
+      } else {
+        payload.input_method = "manual"; payload.status = form.status || "draft";
+        payload.follow_up_required = form.status === "follow_up";
+      }
+
       let meetingId;
       if (editing) {
         const { error } = await supabase.from("meetings").update(payload).eq("id", editing.id);
-        if (error) throw error;
-        meetingId = editing.id;
+        if (error) throw error; meetingId = editing.id;
       } else {
-        const id = crypto.randomUUID();
+        meetingId = crypto.randomUUID();
         const { error } = await supabase.from("meetings").insert({
-          id, owner_user_id: session?.user?.id, created_by: myName || email,
-          created_by_email: email, input_method: "manual", ...payload,
+          id: meetingId, owner_user_id: session?.user?.id, created_by: myName || email,
+          created_by_email: email, ...payload,
         });
         if (error) throw error;
-        meetingId = id;
       }
-      // 참석자 재동기화 (편집 시 교체)
+
+      // 음성파일 업로드 (회의 생성 후 — Storage RLS는 meeting_id 폴더 기준)
+      if (!editing && inputType === "audio" && file) {
+        const fileId = crypto.randomUUID();
+        const ext = (file.name.split(".").pop() || "dat").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8) || "dat";
+        const path = `${meetingId}/${fileId}/audio.${ext}`;
+        const { error: upErr } = await supabase.storage.from("meeting-audio")
+          .upload(path, file, { contentType: file.type || "application/octet-stream", upsert: false });
+        if (upErr) {
+          // 업로드 실패 → 방금 만든 회의 롤백(보관)
+          await supabase.from("meetings").update({ deleted_at: new Date().toISOString() }).eq("id", meetingId);
+          throw new Error(`음성 업로드 실패: ${upErr.message}`);
+        }
+        await supabase.from("meeting_files").insert({
+          id: fileId, meeting_id: meetingId, kind: "audio", storage_path: path,
+          original_filename: file.name, mime_type: file.type || null, size_bytes: file.size, uploaded_by: email,
+        });
+      }
+
       const rows = parseParticipants(form.participants).map(p => ({ ...p, meeting_id: meetingId }));
       await supabase.from("meeting_participants").delete().eq("meeting_id", meetingId);
       if (rows.length) await supabase.from("meeting_participants").insert(rows);
       setParts(p => ({ ...p, [meetingId]: rows }));
-      onNotice?.(editing ? "회의록을 수정했습니다." : "회의록을 등록했습니다.", "success");
+      onNotice?.(editing ? "회의록을 수정했습니다."
+        : inputType === "audio" ? "업로드 완료 — 전사 대기열에 등록되었습니다."
+        : "회의록을 등록했습니다.", "success");
       setModal(null); reload();
     } catch (e) { onNotice?.(`저장 실패: ${e.message}`, "error"); }
     setBusy(false);
@@ -315,7 +359,7 @@ export default function MeetingView({ session, viewer, onNotice }) {
       {modal && <MeetingModal init={modal} busy={busy} myName={myName}
                               participants={parts[modal.id] || []}
                               onClose={() => setModal(null)}
-                              onSave={(form) => saveMeeting(form, modal.id ? modal : null)} />}
+                              onSave={(form, inputType, file) => saveAny(form, modal.id ? modal : null, inputType, file)} />}
 
       {confirmDel && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.55)" }} onClick={() => setConfirmDel(null)}>
@@ -334,9 +378,12 @@ export default function MeetingView({ session, viewer, onNotice }) {
   );
 }
 
-// ── 작성·수정 모달 (직접작성) ─────────────────────────────
+// ── 작성·수정 모달 (입력 3방식: 직접작성·음성파일·메모붙여넣기) ───────────
 function MeetingModal({ init, busy, myName, participants, onClose, onSave }) {
   const editing = !!init?.id;
+  const fileRef = useRef(null);
+  const [inputType, setInputType] = useState(editing ? "manual" : "manual"); // manual | audio | paste
+  const [file, setFile] = useState(null);
   const [f, setF] = useState({
     title: init.title || "",
     meeting_date: init.meeting_date ? String(init.meeting_date).slice(0, 16) : "",
@@ -350,17 +397,35 @@ function MeetingModal({ init, busy, myName, participants, onClose, onSave }) {
     decisions: Array.isArray(init.decisions) ? init.decisions.map(d => typeof d === "string" ? d : d.decision).join("\n") : "",
     action_items: Array.isArray(init.action_items) ? init.action_items.map(a => a.task).join("\n") : "",
     participants: (participants || []).map(p => p.email ? `${p.display_name}, ${p.email}` : p.display_name).join("\n"),
+    paste_text: init.transcript_text || "",
   });
   const set = (k, v) => setF(s => ({ ...s, [k]: v }));
+  const isManual = editing || inputType === "manual";
+
+  const TABS = [["manual", "직접작성", <PencilLine size={13} />], ["audio", "음성파일", <Mic size={13} />], ["paste", "메모 붙여넣기", <ClipboardPaste size={13} />]];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.5)" }} onClick={onClose}>
       <div className="bg-white rounded-xl shadow-xl w-full overflow-hidden" style={{ maxWidth: 620, maxHeight: "92vh", display: "flex", flexDirection: "column" }} onClick={e => e.stopPropagation()}>
-        <div className="px-5 py-4 flex items-center justify-between" style={{ background: "#1f3a5f", color: "#fff" }}>
+        <div className="px-5 py-4 flex items-center justify-between" style={{ background: "var(--mg-navy)", color: "#fff" }}>
           <h3 className="font-bold">{editing ? "회의록 수정" : "새 회의록"}</h3>
           <button onClick={onClose} className="hover:opacity-70"><X size={18} /></button>
         </div>
         <div className="p-5 space-y-3 text-[13px] overflow-auto">
+          {/* 입력 방식 탭 (신규만) */}
+          {!editing && (
+            <div className="flex gap-2">
+              {TABS.map(([key, lbl, ic]) => (
+                <button key={key} type="button" onClick={() => setInputType(key)}
+                        className="flex-1 px-3 py-2 text-[12px] font-bold rounded-md flex items-center justify-center gap-1.5"
+                        style={inputType === key ? { background: "var(--mg-accent)", color: "#fff" } : { background: "#fff", color: "var(--mg-sub)", border: "1px solid var(--mg-line)" }}>
+                  {ic} {lbl}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* 회의 기본 정보 (공통) */}
           <div><div className="mlbl">회의명 *</div><input value={f.title} onChange={e => set("title", e.target.value)} className="vc-input" /></div>
           <div className="grid grid-cols-2 gap-2">
             <div><div className="mlbl">일시</div><input type="datetime-local" value={f.meeting_date} onChange={e => set("meeting_date", e.target.value)} className="vc-input" /></div>
@@ -368,21 +433,42 @@ function MeetingModal({ init, busy, myName, participants, onClose, onSave }) {
             <div><div className="mlbl">방식</div><select value={f.meeting_method} onChange={e => set("meeting_method", e.target.value)} className="vc-input"><option value="">선택</option>{METHODS.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
             <div><div className="mlbl">장소</div><input value={f.location} onChange={e => set("location", e.target.value)} className="vc-input" /></div>
             <div><div className="mlbl">공개 범위</div><select value={f.visibility} onChange={e => set("visibility", e.target.value)} className="vc-input">{Object.entries(VIS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div>
-            <div><div className="mlbl">상태</div><select value={f.status} onChange={e => set("status", e.target.value)} className="vc-input">{STATUS_ORDER.map(s => <option key={s} value={s}>{STATUS[s].label}</option>)}</select></div>
+            {isManual && <div><div className="mlbl">상태</div><select value={f.status} onChange={e => set("status", e.target.value)} className="vc-input">{STATUS_ORDER.map(s => <option key={s} value={s}>{STATUS[s].label}</option>)}</select></div>}
           </div>
           <div><div className="mlbl">참석자 <span style={{ color: "#94a3b8", fontWeight: 400 }}>(한 줄에 한 명: 이름, 이메일)</span></div>
             <textarea value={f.participants} onChange={e => set("participants", e.target.value)} rows={2} className="vc-input" placeholder={`김찬수, chanse7979@gmail.com\n최승표`} /></div>
-          <div><div className="mlbl">안건 <span style={{ color: "#94a3b8", fontWeight: 400 }}>(한 줄에 하나)</span></div><textarea value={f.agenda} onChange={e => set("agenda", e.target.value)} rows={2} className="vc-input" /></div>
-          <div><div className="mlbl">회의 내용</div><textarea value={f.minutes_text} onChange={e => set("minutes_text", e.target.value)} rows={4} className="vc-input" /></div>
-          <div><div className="mlbl">결정사항 <span style={{ color: "#94a3b8", fontWeight: 400 }}>(한 줄에 하나)</span></div><textarea value={f.decisions} onChange={e => set("decisions", e.target.value)} rows={2} className="vc-input" /></div>
-          <div><div className="mlbl">할 일 <span style={{ color: "#94a3b8", fontWeight: 400 }}>(한 줄에 하나)</span></div><textarea value={f.action_items} onChange={e => set("action_items", e.target.value)} rows={2} className="vc-input" /></div>
-          <div className="rounded-md p-2.5 text-[12px]" style={{ background: "#eff6ff", border: "1px solid #bfdbfe", color: "#1e3a5f" }}>
-            음성파일 업로드·자동 전사·AI 정리는 2차 단계에서 추가됩니다. 지금은 직접 작성으로 기록합니다.
-          </div>
+
+          {/* 직접작성 */}
+          {isManual && <>
+            <div><div className="mlbl">안건 <span style={{ color: "#94a3b8", fontWeight: 400 }}>(한 줄에 하나)</span></div><textarea value={f.agenda} onChange={e => set("agenda", e.target.value)} rows={2} className="vc-input" /></div>
+            <div><div className="mlbl">회의 내용</div><textarea value={f.minutes_text} onChange={e => set("minutes_text", e.target.value)} rows={4} className="vc-input" /></div>
+            <div><div className="mlbl">결정사항 <span style={{ color: "#94a3b8", fontWeight: 400 }}>(한 줄에 하나)</span></div><textarea value={f.decisions} onChange={e => set("decisions", e.target.value)} rows={2} className="vc-input" /></div>
+            <div><div className="mlbl">할 일 <span style={{ color: "#94a3b8", fontWeight: 400 }}>(한 줄에 하나)</span></div><textarea value={f.action_items} onChange={e => set("action_items", e.target.value)} rows={2} className="vc-input" /></div>
+          </>}
+
+          {/* 음성파일 */}
+          {!editing && inputType === "audio" && <>
+            <div><div className="mlbl">음성파일 *</div>
+              <input ref={fileRef} type="file" accept={AUDIO_ACCEPT} onChange={e => setFile(e.target.files?.[0] || null)} className="block w-full text-[13px]" />
+              {file && <div className="text-[12px] mt-1" style={{ color: "var(--mg-sub)" }}><FileAudio size={12} className="inline" /> {file.name} · {(file.size / 1048576).toFixed(1)}MB</div>}
+            </div>
+            <div className="rounded-md p-2.5 flex items-start gap-2 text-[12px]" style={{ background: "#fff7ed", border: "1px solid #fed7aa", color: "#9a3412" }}>
+              <ShieldAlert size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>전사는 회사 PC 안 로컬 whisper로만 처리되며 외부로 전송되지 않습니다. 요약(Hermes 구독)은 마스킹 후 진행됩니다. 등록하면 전사 대기열에 올라가고, 완료되면 자동으로 채워집니다.</span>
+            </div>
+          </>}
+
+          {/* 메모 붙여넣기 */}
+          {!editing && inputType === "paste" && <>
+            <div><div className="mlbl">메모/회의록 원문 붙여넣기</div>
+              <textarea value={f.paste_text} onChange={e => set("paste_text", e.target.value)} rows={7} className="vc-input" placeholder="카카오톡·이메일·수기 메모를 붙여넣으면 전사 원문으로 저장됩니다. AI 정리는 요약 단계에서 진행됩니다." /></div>
+          </>}
         </div>
-        <div className="px-5 py-3 flex justify-end gap-2 border-t" style={{ borderColor: "#d9e3ee", background: "#f8fbfd" }}>
+        <div className="px-5 py-3 flex justify-end gap-2 border-t" style={{ borderColor: "var(--mg-line)", background: "#f8fbfd" }}>
           <button onClick={onClose} className="btn btn-ghost" disabled={busy}>취소</button>
-          <button onClick={() => onSave(f)} className="btn btn-primary" disabled={busy}>{busy ? "저장 중…" : editing ? "수정" : "등록"}</button>
+          <button onClick={() => onSave(f, editing ? "manual" : inputType, file)} className="btn btn-primary" disabled={busy}>
+            {busy ? "저장 중…" : editing ? "수정" : inputType === "audio" ? <><Upload size={14} /> 업로드</> : "등록"}
+          </button>
         </div>
       </div>
     </div>
