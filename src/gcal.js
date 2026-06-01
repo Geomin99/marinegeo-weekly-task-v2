@@ -75,6 +75,24 @@ export async function createAllDayEvent({ summary, description, date, colorId })
   }
 }
 
+// MGEO 캘린더 이벤트 직접 수정(제목·시간·설명). body는 Google events.patch 형식.
+export async function updateCalendarEvent(eventId, body) {
+  const token = loadGcalToken();
+  const calId = loadGcalCalendarId();
+  if (!token || !calId) return { ok: false, reason: "not_ready" };
+  try {
+    const r = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(eventId)}`,
+      { method: "PATCH", headers: { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    );
+    if (r.ok) return { ok: true };
+    const d = await r.json().catch(() => ({}));
+    return { ok: false, reason: d.error?.message || `status_${r.status}` };
+  } catch (e) {
+    return { ok: false, reason: e.message };
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
 // 휴가·출장 → MGEO 캘린더 동기화 (LeaveView 자동 + 대시보드 트리거 공용)
 // ─────────────────────────────────────────────────────────────

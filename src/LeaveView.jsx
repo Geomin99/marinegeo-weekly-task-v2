@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, Component } from "react";
 import {
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, X,
   Plane, Check, Clock, AlertCircle, Trash2,
@@ -6,7 +6,25 @@ import {
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { ErpHero } from "./ErpHero.jsx";
-import { syncLeaveRequests, needsCalendarSync } from "./gcal";
+import { syncLeaveRequests, needsCalendarSync, updateCalendarEvent } from "./gcal";
+
+// 흰화면 크래시 방지: 캘린더/모달에서 예외가 나도 앱 전체가 죽지 않게 감싼다.
+class CalErrorBoundary extends Component {
+  constructor(p) { super(p); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  componentDidCatch(err) { try { console.error("[Calendar]", err); } catch { /* noop */ } }
+  render() {
+    if (this.state.err) {
+      return (
+        <div style={{ padding: 24, color: "#b91c1c" }}>
+          캘린더 화면에서 오류가 발생했습니다. 새로고침해 주세요.
+          <button onClick={() => this.setState({ err: null })} style={{ marginLeft: 8, textDecoration: "underline" }}>다시 시도</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ─────────────────────────────────────────────────────────────
 // 회사 디자인 토큰 (마린엔지오 navy/blue 표준)
@@ -229,6 +247,7 @@ export default function LeaveView() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalInit, setModalInit] = useState(null);  // {date} or {request}
+  const [genEvent, setGenEvent] = useState(null);  // 일반 MGEO 이벤트 편집 (휴가·출장과 분리)
   const [showBalances, setShowBalances] = useState(false);  // 개인정보 보호 — 기본 숨김
 
   // 초기 로드
@@ -302,9 +321,8 @@ export default function LeaveView() {
 
   function openEdit(request) {
     if (request.is_external) {
-      // 외부 MGEO 이벤트를 사이트 신청으로 변환하는 모달 (prefill)
-      setModalInit({ externalEvent: request });
-      setModalOpen(true);
+      // 일반 MGEO 이벤트 → 휴가 신청 변환이 아니라 "일정 편집" 모달로 분기 (포테토뭉 권고)
+      setGenEvent(request);
       return;
     }
     setModalInit({ request });
@@ -312,6 +330,7 @@ export default function LeaveView() {
   }
 
   return (
+    <CalErrorBoundary>
     <div className="px-6 py-6">
       <ErpHero
         title="휴가·출장"
@@ -418,7 +437,21 @@ export default function LeaveView() {
           )}
         />
       )}
+
+      {/* ── 일반 MGEO 일정 편집 모달 ───────────── */}
+      {genEvent && (
+        <GeneralEventModal
+          event={genEvent}
+          onClose={() => setGenEvent(null)}
+          onUpdated={(id, patch) => setExternalEvents(prev =>
+            prev.map(e => e.id === id ? { ...e, ...patch } : e)
+          )}
+          onDeleted={(id) => setExternalEvents(prev => prev.filter(e => e.id !== id))}
+          onConvert={(ev) => { setGenEvent(null); setModalInit({ externalEvent: ev }); setModalOpen(true); }}
+        />
+      )}
     </div>
+    </CalErrorBoundary>
   );
 }
 
@@ -974,6 +1007,171 @@ function RecentRequestList({ requests, onEdit }) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// 일반 MGEO 일정 보기·편집 모달 (휴가·출장 신청과 분리 — 통화 마감/센터/회의/기타)
+// 포테토뭉 권고: 신청 변환 모달과 완전 분리 + 널 가드 + 모달 내 오류 표시 + confirm 2단계
+// ─────────────────────────────────────────────────────────────
+function addDaysStr(dateStr, delta) {
+  try {
+    const d = new Date(dateStr + "T00:00:00");
+    if (Number.isNaN(d.getTime())) return dateStr;
+    d.setDate(d.getDate() + delta);
+    return ymd(d);
+  } catch { return dateStr; }
+}
+
+function GeneralEventModal({ event, onClose, onUpdated, onDeleted, onConvert }) {
+  // 널 가드 — 이벤트/식별자 없으면 렌더 자체를 하지 않는다(흰화면 방지).
+  if (!event || !event.id) return null;
+
+  const startInit = event.start_date || event._start || ymd(new Date());
+  const exEndInit = event.end_date || event._end || startInit;  // all-day는 exclusive
+  const allDayInit = event.is_all_day !== false;
+
+  const [title, setTitle] = useState(event.summary || "");
+  const [allDay, setAllDay] = useState(allDayInit);
+  const [sDate, setSDate] = useState(startInit);
+  // all-day 종료일은 inclusive(표시용)로 환산, 시간 지정은 시작일과 동일하게 시작
+  const [eDate, setEDate] = useState(allDayInit ? addDaysStr(exEndInit, -1) : startInit);
+  const [sTime, setSTime] = useState(event.start_time || "09:00");
+  const [eTime, setETime] = useState("10:00");
+  const [memo, setMemo] = useState(event.description || "");
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function handleSave() {
+    if (!title.trim()) { setErr("제목을 입력해 주세요."); return; }
+    setErr(""); setSaving(true);
+    let body, patch;
+    if (allDay) {
+      const exclusive = addDaysStr(eDate, 1);
+      body = { summary: title, description: memo, start: { date: sDate, dateTime: null }, end: { date: exclusive, dateTime: null } };
+      patch = { summary: title, description: memo, start_date: sDate, end_date: exclusive, is_all_day: true, start_time: null };
+    } else {
+      const startISO = `${sDate}T${(sTime || "09:00").slice(0, 5)}:00+09:00`;
+      const endISO = `${eDate}T${(eTime || "10:00").slice(0, 5)}:00+09:00`;
+      body = {
+        summary: title, description: memo,
+        start: { dateTime: startISO, timeZone: "Asia/Seoul", date: null },
+        end: { dateTime: endISO, timeZone: "Asia/Seoul", date: null },
+      };
+      let gridEnd = eDate; if (gridEnd === sDate) gridEnd = addDaysStr(sDate, 1);
+      patch = { summary: title, description: memo, start_date: sDate, end_date: gridEnd, is_all_day: false, start_time: (sTime || "09:00").slice(0, 5) };
+    }
+    const res = await updateCalendarEvent(event.id, body);
+    setSaving(false);
+    if (res?.ok) { onUpdated?.(event.id, patch); onClose?.(); }
+    else setErr("저장 실패: " + (res?.reason || "알 수 없는 오류") + " (토큰 만료·권한 부족일 수 있습니다)");
+  }
+
+  async function handleDelete() {
+    setErr(""); setDeleting(true);
+    const res = await tryDeleteCalendarEvent(event.id);
+    setDeleting(false);
+    if (res?.ok) { onDeleted?.(event.id); onClose?.(); }
+    else setErr("삭제 실패: " + (res?.reason || "알 수 없는 오류"));
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+         style={{ background: "rgba(15, 23, 42, 0.5)" }} onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden"
+           onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-4 flex items-center justify-between"
+             style={{ background: THEME.navy, color: "#fff" }}>
+          <div className="flex items-center gap-2">
+            <CalendarIcon size={18} />
+            <h3 className="font-bold">MGEO 캘린더 일정 편집</h3>
+          </div>
+          <button onClick={onClose} className="hover:opacity-70"><X size={18} /></button>
+        </div>
+
+        <div className="p-5 space-y-3 text-sm">
+          {err && (
+            <div className="rounded-md p-3 text-xs"
+                 style={{ background: "#fef2f2", border: "1px solid #fca5a5", color: "#7f1d1d" }}>
+              {err}
+            </div>
+          )}
+          <div className="grid grid-cols-3 gap-3">
+            <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>제목</label>
+            <input value={title} onChange={(e) => setTitle(e.target.value)}
+                   className="col-span-2 px-3 py-2 border rounded-md outline-none"
+                   style={{ borderColor: THEME.line }} />
+
+            <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>종일</label>
+            <div className="col-span-2 flex items-center gap-2">
+              <input type="checkbox" checked={allDay} onChange={(e) => setAllDay(e.target.checked)} />
+              <span style={{ color: THEME.sub }}>종일 일정</span>
+            </div>
+
+            <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>시작</label>
+            <div className="col-span-2 flex items-center gap-2">
+              <input type="date" value={sDate} onChange={(e) => setSDate(e.target.value)}
+                     className="px-3 py-2 border rounded-md outline-none" style={{ borderColor: THEME.line }} />
+              {!allDay && (
+                <input type="time" value={sTime} onChange={(e) => setSTime(e.target.value)}
+                       className="px-3 py-2 border rounded-md outline-none" style={{ borderColor: THEME.line }} />
+              )}
+            </div>
+
+            <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>종료</label>
+            <div className="col-span-2 flex items-center gap-2">
+              <input type="date" value={eDate} onChange={(e) => setEDate(e.target.value)}
+                     className="px-3 py-2 border rounded-md outline-none" style={{ borderColor: THEME.line }} />
+              {!allDay && (
+                <input type="time" value={eTime} onChange={(e) => setETime(e.target.value)}
+                       className="px-3 py-2 border rounded-md outline-none" style={{ borderColor: THEME.line }} />
+              )}
+            </div>
+
+            <label className="col-span-1 self-start mt-1 font-semibold" style={{ color: THEME.sub }}>메모</label>
+            <textarea value={memo} onChange={(e) => setMemo(e.target.value)} rows={3}
+                      className="col-span-2 px-3 py-2 border rounded-md outline-none resize-none"
+                      style={{ borderColor: THEME.line }} />
+          </div>
+
+          <div className="text-xs px-1" style={{ color: THEME.sub }}>
+            이 일정은 MGEO 구글 캘린더 원본입니다. 휴가·출장 신청으로 관리하려면&nbsp;
+            <button onClick={() => onConvert?.(event)} className="underline font-semibold"
+                    style={{ color: THEME.navy }}>신청으로 변환</button>하세요.
+          </div>
+        </div>
+
+        <div className="px-5 py-3 flex items-center justify-between border-t" style={{ borderColor: THEME.line }}>
+          {confirmDel ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold" style={{ color: THEME.warn }}>캘린더에서 삭제할까요?</span>
+              <button onClick={handleDelete} disabled={deleting}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-md text-white"
+                      style={{ background: "#dc2626" }}>{deleting ? "삭제 중…" : "삭제 확정"}</button>
+              <button onClick={() => setConfirmDel(false)} disabled={deleting}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-md border"
+                      style={{ borderColor: THEME.line, color: THEME.sub }}>취소</button>
+            </div>
+          ) : (
+            <button onClick={() => setConfirmDel(true)}
+                    className="px-3 py-2 text-xs font-semibold rounded-md flex items-center gap-1.5"
+                    style={{ color: "#dc2626", border: "1px solid #fca5a5" }}>
+              <Trash2 size={13} /> 삭제
+            </button>
+          )}
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} disabled={saving}
+                    className="px-4 py-2 text-sm font-semibold rounded-md border"
+                    style={{ borderColor: THEME.line, color: THEME.sub }}>닫기</button>
+            <button onClick={handleSave} disabled={saving}
+                    className="px-4 py-2 text-sm font-semibold rounded-md text-white shadow-md"
+                    style={{ background: THEME.navy }}>{saving ? "저장 중…" : "저장"}</button>
+          </div>
+        </div>
       </div>
     </div>
   );
