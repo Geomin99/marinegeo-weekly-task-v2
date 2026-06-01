@@ -57,6 +57,29 @@ function getAuthorColor(name) {
   return AUTHOR_COLORS[name] || { bg: "#56657a", text: "#ffffff", soft: "#f1f3f5" };
 }
 
+// 일정 종류별 파스텔 색 (포테토뭉 권고 팔레트). bg=연한 배경, fg=진한 동일계열 글자, dot=좌측 바
+const CATEGORY_COLORS = {
+  leave:   { label: "휴가", bg: "#d9f0e3", fg: "#1f5c3b", dot: "#16a34a" },
+  trip:    { label: "출장", bg: "#dbeafe", fg: "#1e4f8f", dot: "#245f9a" },
+  call:    { label: "통화", bg: "#fde2e2", fg: "#8a2f2f", dot: "#dc6a6a" },
+  center:  { label: "센터", bg: "#e6e3f8", fg: "#4f4a91", dot: "#7986cb" },
+  meeting: { label: "회의", bg: "#fff1c7", fg: "#6b4a00", dot: "#caa53d" },
+  etc:     { label: "기타", bg: "#e5e7eb", fg: "#374151", dot: "#9aa3af" },
+};
+// 이벤트 → 종류 키
+function eventCategory(ev) {
+  if (ev.is_external) {
+    const s = ev.summary || "";
+    if (s.includes("해양벤처진흥센터") || s.includes("센터완료")) return "center";
+    if (s.includes("통화")) return "call";
+    if (s.includes("회의")) return "meeting";
+    return "etc";
+  }
+  if (ev.leave_type_name === "출장") return "trip";
+  if (ev.leave_type_name === "회의") return "meeting";
+  return "leave";  // 휴가·반차·예비군 등 연차 계열
+}
+
 // 상태 한글 매핑
 const STATUS_LABEL = {
   pending:   "대기",
@@ -394,23 +417,26 @@ export default function LeaveView({ viewer } = {}) {
       />
 
       {/* ── 범례 ──────────────────────────────── */}
-      <div className="flex items-center gap-4 mt-4 text-xs"
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-4 text-xs"
            style={{ color: THEME.sub }}>
-        <span>직원:</span>
+        <span className="font-semibold">종류:</span>
+        {Object.values(CATEGORY_COLORS).map((cat) => (
+          <span key={cat.label} className="flex items-center gap-1.5 px-2 py-0.5 rounded"
+                style={{ background: cat.bg, color: cat.fg, fontWeight: 600,
+                         borderLeft: `3px solid ${cat.dot}` }}>
+            {cat.label}
+          </span>
+        ))}
+        <span className="ml-2 font-semibold">직원(좌측 바):</span>
         {Object.entries(AUTHOR_COLORS).map(([name, c]) => (
           <span key={name} className="flex items-center gap-1.5">
-            <span className="inline-block w-3 h-3 rounded"
-                  style={{ background: c.bg }}></span>
+            <span className="inline-block w-3 h-3 rounded" style={{ background: c.bg }}></span>
             {name}
           </span>
         ))}
-        <span className="ml-4">상태:</span>
-        <span className="flex items-center gap-1.5">
-          <Clock size={12} /> 대기
-        </span>
-        <span className="flex items-center gap-1.5">
-          <Check size={12} style={{ color: THEME.green }} /> 승인
-        </span>
+        <span className="ml-2 font-semibold">상태:</span>
+        <span className="flex items-center gap-1.5"><Clock size={12} /> 대기</span>
+        <span className="flex items-center gap-1.5"><Check size={12} style={{ color: THEME.green }} /> 승인</span>
       </div>
 
       {/* ── 직원별 잔여 (개인정보 보호: 공용메일은 숨김. 연차 현황은 RLS로 DB 차단) ──── */}
@@ -952,9 +978,12 @@ function CalendarGrid({ cells, events, onCellClick, onEventClick, today }) {
                 const label = isExternal
                   ? `${ev.start_time ? `🕐 ${ev.start_time} ` : "📅 "}${ev.summary}`
                   : `${isTrip ? "✈ " : ""}${siteTime ? `🕐 ${siteTime} ` : ""}${ev.author} · ${ev.leave_type_name}${ev.destination ? " · " + ev.destination : ""}`;
-                // 색상 전략: 진한 배경 + 흰 글자 (모든 막대 통일). pending은 dashed border로 구분.
-                const bg = isExternal ? (isCenterEvt ? "#7986cb" : "#64748b") : c.bg;
-                const fg = isPast ? "rgba(255,255,255,0.72)" : "#ffffff";  // 지나간 일정은 회색톤
+                // 색상 전략: 종류별 파스텔 배경 + 진한 동일계열 글자. 좌측 바 = 내부는 직원색, 외부는 종류색.
+                // 직원 구분(휴가/출장)은 좌측 바, 종류는 배경색으로 표현. pending은 dashed border.
+                const cat = CATEGORY_COLORS[eventCategory(ev)] || CATEGORY_COLORS.etc;
+                const bg = cat.bg;
+                const fg = cat.fg;
+                const leftBar = isExternal ? cat.dot : (c?.bg || cat.dot);  // 내부 신청은 직원색 바
                 return (
                   <div key={(ev.id || "x") + "-" + i + "-" + wi}
                        onClick={(e) => { e.stopPropagation(); onEventClick(ev); }}
@@ -969,10 +998,11 @@ function CalendarGrid({ cells, events, onCellClick, onEventClick, today }) {
                          fontSize: "12.5px",
                          background: bg,
                          color: fg,
-                         border: isPending ? `1.5px dashed rgba(255,255,255,0.55)` : "none",
-                         borderLeft: isTrip ? `4px solid ${THEME.warn}` : (isPending ? `1.5px dashed rgba(255,255,255,0.55)` : "none"),
+                         border: isPending ? `1.5px dashed ${cat.fg}66` : "none",
+                         borderLeft: `4px solid ${leftBar}`,
                          fontStyle: isExternal ? "italic" : "normal",
-                         fontWeight: isPast ? 400 : 700,
+                         fontWeight: isPast ? 500 : 700,
+                         opacity: isPast ? 0.6 : 1,
                          letterSpacing: "-0.2px",
                        }}
                        title={isExternal
