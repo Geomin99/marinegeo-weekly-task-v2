@@ -3,10 +3,11 @@ import {
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, X,
   Plane, Check, Clock, AlertCircle, Trash2,
   ChevronDown, ChevronUp, Users, Link2,
+  Info, ArrowRightLeft,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { ErpHero } from "./ErpHero.jsx";
-import { syncLeaveRequests, needsCalendarSync, updateCalendarEvent } from "./gcal";
+import { syncLeaveRequests, needsCalendarSync, updateCalendarEvent, createAllDayEvent } from "./gcal";
 
 // 흰화면 크래시 방지: 캘린더/모달에서 예외가 나도 앱 전체가 죽지 않게 감싼다.
 class CalErrorBoundary extends Component {
@@ -435,6 +436,12 @@ export default function LeaveView() {
           onExternalDeleted={(ids) => setExternalEvents(prev =>
             prev.filter(e => !ids.includes(e.id))
           )}
+          onConvertedToGeneral={(extEvt) => {
+            // event id 기준 upsert(중복 방지) + 신청행은 reloadAll로 제거
+            setExternalEvents(prev => [...prev.filter(e => e.id !== extEvt.id), extEvt]);
+            setModalOpen(false);
+            reloadAll();
+          }}
         />
       )}
 
@@ -1100,6 +1107,19 @@ function GeneralEventModal({ event, onClose, onUpdated, onDeleted, onConvert }) 
               {err}
             </div>
           )}
+          {/* ★ 상단 강조 배너 — 일반 일정 ↔ 휴가·출장 신청 변환 동선 (가시성) */}
+          <div className="rounded-lg p-3 flex items-center justify-between gap-3"
+               style={{ background: THEME.accentSoft, border: `1px solid ${THEME.accent}33` }}>
+            <div className="flex items-start gap-2 text-xs leading-relaxed" style={{ color: THEME.navy }}>
+              <Info size={16} style={{ color: THEME.accent, marginTop: 1, flexShrink: 0 }} />
+              <span>이 일정은 <b>MGEO 캘린더 일반 일정</b>입니다.<br />휴가·출장으로 관리하려면 변환하세요.</span>
+            </div>
+            <button onClick={() => onConvert?.(event)}
+                    className="shrink-0 px-3 py-2 text-xs font-bold rounded-md text-white flex items-center gap-1.5 shadow-sm"
+                    style={{ background: THEME.accent }}>
+              <ArrowRightLeft size={13} /> 휴가·출장 신청으로 변환
+            </button>
+          </div>
           <div className="grid grid-cols-3 gap-3">
             <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>제목</label>
             <input value={title} onChange={(e) => setTitle(e.target.value)}
@@ -1136,12 +1156,6 @@ function GeneralEventModal({ event, onClose, onUpdated, onDeleted, onConvert }) 
             <textarea value={memo} onChange={(e) => setMemo(e.target.value)} rows={3}
                       className="col-span-2 px-3 py-2 border rounded-md outline-none resize-none"
                       style={{ borderColor: THEME.line }} />
-          </div>
-
-          <div className="text-xs px-1" style={{ color: THEME.sub }}>
-            이 일정은 MGEO 구글 캘린더 원본입니다. 휴가·출장 신청으로 관리하려면&nbsp;
-            <button onClick={() => onConvert?.(event)} className="underline font-semibold"
-                    style={{ color: THEME.navy }}>신청으로 변환</button>하세요.
           </div>
         </div>
 
@@ -1180,7 +1194,7 @@ function GeneralEventModal({ event, onClose, onUpdated, onDeleted, onConvert }) 
 // ─────────────────────────────────────────────────────────────
 // 신청·수정 모달
 // ─────────────────────────────────────────────────────────────
-function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSaved, onExternalDeleted }) {
+function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSaved, onExternalDeleted, onConvertedToGeneral }) {
   const isEdit = !!init?.request;
   const existing = init?.request;
   const ext = init?.externalEvent;  // 외부 MGEO 이벤트 → 변환 모드
@@ -1353,6 +1367,53 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
         : "이 이벤트를 MGEO 캘린더에서 영구 삭제합니다.")
     : "";
 
+  // 신청 → 일반 일정 변환: 신청행 삭제(연차·보상휴가 복구) + 캘린더 이벤트는 보존(일반 일정으로 전환)
+  // 포테토뭉 조건부 GO: 승인상태 경고 + 미동기화 시 이벤트 생성 성공 후 삭제 + 실패 rollback + origin 표기
+  async function doConvertToGeneral() {
+    setConfirmKind(null);
+    if (!isEdit || !existing) return;
+    setSaving(true); setErrText("");
+    let eventId = existing.google_calendar_event_id;
+    let createdNow = false;
+    const summary = `[${existing.author}] ${existing.leave_type_name || "일정"}${existing.destination ? " - " + existing.destination : ""}`;
+    const description = (existing.memo ? existing.memo + "\n\n" : "") + "[휴가·출장 신청에서 일반 일정으로 전환됨]";
+    // 1) 캘린더 이벤트 확보 (미동기화 신청이면 생성 성공 후에만 진행)
+    if (!eventId) {
+      const c = await createAllDayEvent({ summary, description, date: existing.start_date });
+      if (!c.ok) { setSaving(false); setErrText("변환 실패(캘린더 이벤트 생성): " + (c.reason || "")); return; }
+      eventId = c.eventId; createdNow = true;
+    } else {
+      await updateCalendarEvent(eventId, { description });  // origin 표기 (실패해도 비치명적)
+    }
+    // 2) 신청행 삭제 (+ 출장 보상휴가 재계산)
+    const wasTrip = existing.leave_type_name === "출장";
+    const wasAuthor = existing.author;
+    const wasYear = existing.start_date ? new Date(existing.start_date).getFullYear() : null;
+    const { error } = await supabase.from("leave_requests").delete().eq("id", existing.id);
+    if (error) {
+      if (createdNow) await tryDeleteCalendarEvent(eventId);  // rollback
+      setSaving(false); setErrText("변환 실패(신청 삭제): " + error.message); return;
+    }
+    if (wasTrip && wasAuthor && wasYear && COMPENSATORY_TARGETS.has(wasAuthor)) {
+      try { await recalculateCompensatoryGrant(wasAuthor, wasYear, holidays || new Set()); }
+      catch (e) { console.warn("보상 누적 재계산 실패:", e); }
+    }
+    // 3) 즉시 반영용 external 이벤트 객체 (end는 exclusive로 환산)
+    const endDt = new Date(existing.end_date || existing.start_date);
+    endDt.setDate(endDt.getDate() + 1);
+    const extEvt = {
+      is_external: true,
+      is_all_day: existing.is_all_day !== false,
+      start_time: existing.is_all_day === false && existing.start_time ? existing.start_time.slice(0, 5) : null,
+      id: eventId, summary, description,
+      start_date: existing.start_date, end_date: ymd(endDt),
+      author: "(MGEO 캘린더)", leave_type_name: summary, status: "external",
+    };
+    setSaving(false);
+    onConvertedToGeneral?.(extEvt);
+    onClose();
+  }
+
   return (
     <>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -1384,6 +1445,21 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
               <div className="font-bold mb-1">📥 MGEO 캘린더 원본 이벤트를 사이트 신청으로 변환</div>
               <div>원본: <span className="font-semibold">{ext.summary}</span></div>
               <div>저장하면 사이트 데이터로 등록 + 캘린더 이벤트도 사이트 형식(`[직원] 종류`)으로 갱신됩니다.</div>
+            </div>
+          )}
+          {/* ★ 신청 → 일반 일정 변환 (양방향) */}
+          {isEdit && (
+            <div className="rounded-lg p-3 flex items-center justify-between gap-3"
+                 style={{ background: THEME.accentSoft, border: `1px solid ${THEME.accent}33` }}>
+              <div className="flex items-start gap-2 text-xs leading-relaxed" style={{ color: THEME.navy }}>
+                <Info size={16} style={{ color: THEME.accent, marginTop: 1, flexShrink: 0 }} />
+                <span>이건 <b>휴가·출장 신청</b>입니다.<br />일반 캘린더 일정으로 바꾸면 신청 기록·연차 차감이 해제됩니다.</span>
+              </div>
+              <button onClick={() => { setErrText(""); setConfirmKind("toGeneral"); }} disabled={saving}
+                      className="shrink-0 px-3 py-2 text-xs font-bold rounded-md flex items-center gap-1.5"
+                      style={{ color: THEME.accent, border: `1px solid ${THEME.accent}`, background: "#fff" }}>
+                <ArrowRightLeft size={13} /> 일반 일정으로 변환
+              </button>
             </div>
           )}
           <div className="grid grid-cols-3 gap-3">
@@ -1574,15 +1650,26 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
            style={{ background: "rgba(15,23,42,.55)" }} onClick={() => setConfirmKind(null)}>
         <div onClick={(e) => e.stopPropagation()}
              style={{ background: "#fff", borderRadius: 12, padding: 20, width: "min(420px,100%)", boxShadow: "0 18px 50px rgba(0,0,0,.3)" }}>
-          <h3 style={{ margin: 0, color: THEME.navy, fontSize: 17, fontWeight: 800 }}>삭제할까요?</h3>
+          <h3 style={{ margin: 0, color: THEME.navy, fontSize: 17, fontWeight: 800 }}>
+            {confirmKind === "toGeneral" ? "일반 일정으로 변환할까요?" : "삭제할까요?"}
+          </h3>
           <p style={{ margin: "8px 0 0", color: THEME.sub, fontSize: 13, lineHeight: 1.55 }}>
-            {confirmKind === "del" ? "이 신청을 삭제합니다. 복구하기 어렵습니다." : delExtMsg}
+            {confirmKind === "del"
+              ? "이 신청을 삭제합니다. 복구하기 어렵습니다."
+              : confirmKind === "toGeneral"
+                ? `이 신청을 MGEO 캘린더 일반 일정으로 전환합니다. 신청 기록은 삭제되고 연차 차감·출장 보상휴가가 해제됩니다. 캘린더 일정 자체는 그대로 남습니다.${existing?.status === "approved" ? " ⚠ 이미 승인된 신청입니다 — 정산·급여 반영 여부를 확인하세요." : ""}`
+                : delExtMsg}
           </p>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
             <button onClick={() => setConfirmKind(null)}
                     style={{ padding: "8px 16px", borderRadius: 8, border: `1px solid ${THEME.line}`, background: "#fff", color: THEME.sub, fontWeight: 600, cursor: "pointer" }}>취소</button>
-            <button onClick={confirmKind === "del" ? doDelete : doDeleteExternal}
-                    style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #dc2626", background: "#dc2626", color: "#fff", fontWeight: 700, cursor: "pointer" }}>삭제</button>
+            {confirmKind === "toGeneral" ? (
+              <button onClick={doConvertToGeneral}
+                      style={{ padding: "8px 16px", borderRadius: 8, border: `1px solid ${THEME.accent}`, background: THEME.accent, color: "#fff", fontWeight: 700, cursor: "pointer" }}>변환</button>
+            ) : (
+              <button onClick={confirmKind === "del" ? doDelete : doDeleteExternal}
+                      style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #dc2626", background: "#dc2626", color: "#fff", fontWeight: 700, cursor: "pointer" }}>삭제</button>
+            )}
           </div>
         </div>
       </div>
