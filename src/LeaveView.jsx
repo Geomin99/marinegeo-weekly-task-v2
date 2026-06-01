@@ -234,7 +234,12 @@ function mergeContinuousEvents(events) {
 // ─────────────────────────────────────────────────────────────
 // 메인: LeaveView
 // ─────────────────────────────────────────────────────────────
-export default function LeaveView() {
+export default function LeaveView({ viewer } = {}) {
+  // 개인정보 열람 범위: owner=전체 / employee=본인 / shared(공용메일·미등록)=숨김
+  const viewerRole = viewer?.role || "shared";
+  const viewerName = viewer?.name || null;
+  const canSeeAll = viewerRole === "owner";
+  const isSharedViewer = viewerRole === "shared";
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());  // 0~11
@@ -305,6 +310,13 @@ export default function LeaveView() {
       return { ...b, used, remaining: grant - used, grant };
     });
   }, [balances, requests]);
+
+  // 최근 신청 목록 가시성: 대표=전체 / 직원=본인 author만 / 공용=숨김 (달력 그리드는 별도로 전원 표시)
+  const visibleRequests = useMemo(() => {
+    if (canSeeAll) return requests;
+    if (viewerRole === "employee" && viewerName) return requests.filter(r => r.author === viewerName);
+    return [];
+  }, [requests, canSeeAll, viewerRole, viewerName]);
 
   function prevMonth() {
     if (month === 0) { setYear(year - 1); setMonth(11); }
@@ -401,13 +413,16 @@ export default function LeaveView() {
         </span>
       </div>
 
-      {/* ── 직원별 잔여 (달력 아래, 클릭으로 토글 — 개인정보 보호) ──── */}
+      {/* ── 직원별 잔여 (개인정보 보호: 공용메일은 숨김. 연차 현황은 RLS로 DB 차단) ──── */}
+      {!isSharedViewer && (
       <div className="mt-6 rounded-xl border" style={{ background: "#fff", borderColor: THEME.line }}>
         <button onClick={() => setShowBalances(v => !v)}
                 className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 rounded-xl">
           <div className="flex items-center gap-2">
             <Users size={14} style={{ color: THEME.navy }} />
-            <span className="text-sm font-bold" style={{ color: THEME.navy }}>직원별 휴가 현황</span>
+            <span className="text-sm font-bold" style={{ color: THEME.navy }}>
+              {canSeeAll ? "직원별 휴가 현황" : "내 휴가 현황"}
+            </span>
             <span className="text-xs" style={{ color: THEME.sub }}>(개인정보 — 클릭하여 상세)</span>
           </div>
           {showBalances
@@ -420,9 +435,12 @@ export default function LeaveView() {
           </div>
         )}
       </div>
+      )}
 
-      {/* ── 최근 신청 목록 ─────────────────────── */}
-      <RecentRequestList requests={requests.slice(0, 10)} onEdit={openEdit} />
+      {/* ── 최근 신청 목록 (공용메일은 숨김 / 직원은 본인만) ─────────── */}
+      {!isSharedViewer && (
+        <RecentRequestList requests={visibleRequests.slice(0, 10)} onEdit={openEdit} />
+      )}
 
       {/* ── 신청·수정 모달 ────────────────────── */}
       {modalOpen && (

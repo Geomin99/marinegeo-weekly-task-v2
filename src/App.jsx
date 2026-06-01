@@ -1061,11 +1061,17 @@ function Dashboard({ entries, journalStats, centerTasks, leaveRequests, setView,
 // ── 로그인 (MG Auditor식 ID/PIN UX를 Supabase Auth 위에 얹음) ──
 // 아이디 → 실제 Supabase Auth 이메일 매핑. 이메일을 직접 입력해도 로그인 허용.
 const ERP_ACCOUNTS = {
-  yeoeunmin:    { email: "geomin99@gmail.com",    name: "여은민" },
-  kimchansu:    { email: "chanse7979@gmail.com",  name: "김찬수" },
-  choiseungpyo: { email: "pyoring94@gmail.com",   name: "최승표" },
-  marinegeo:    { email: "marinegeo99@gmail.com", name: "마린엔지오" },
+  yeoeunmin:    { email: "geomin99@gmail.com",    name: "여은민",     role: "owner" },
+  kimchansu:    { email: "chanse7979@gmail.com",  name: "김찬수",     role: "employee" },
+  choiseungpyo: { email: "pyoring94@gmail.com",   name: "최승표",     role: "employee" },
+  marinegeo:    { email: "marinegeo99@gmail.com", name: "마린엔지오", role: "shared" },
 };
+// 로그인 사용자의 개인정보 열람 범위: owner=전체, employee=본인, shared(공용메일)=숨김
+function viewerForSession(session) {
+  const email = (session?.user?.email || "").toLowerCase();
+  const hit = Object.values(ERP_ACCOUNTS).find((a) => a.email === email);
+  return { name: hit?.name || null, role: hit?.role || "shared" };  // 미등록 계정도 보수적으로 숨김
+}
 function usernameToEmail(input) {
   const v = (input || "").trim().toLowerCase();
   if (v.includes("@")) return v;                  // 이메일로 직접 로그인
@@ -1490,7 +1496,7 @@ function Workspace({ session }) {
           )}
           {view === "leave" && (
             <section className="module-frame">
-              <LeaveView />
+              <LeaveView viewer={viewerForSession(session)} />
             </section>
           )}
           {view === "center" && (
