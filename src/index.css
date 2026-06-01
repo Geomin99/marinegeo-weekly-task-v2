@@ -1515,6 +1515,9 @@ button.brand-lockup:hover {
 .brief-sub { font-size: 11px; font-weight: 700; color: #94a3b8; flex: 0 0 66px; }
 .brief-label { font-size: 13.5px; font-weight: 600; color: #142033; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .brief-dday { font-size: 12px; font-weight: 800; color: #475467; flex: 0 0 auto; }
+/* 통화 로그 입력 필드 */
+.vc-input { border: 1px solid #d9e3ee; border-radius: 8px; padding: 7px 10px; font-size: 13px; color: #142033; background: #fff; width: 100%; }
+.vc-input:focus { outline: none; border-color: #0b7cc1; box-shadow: 0 0 0 2px rgba(11,124,193,.12); }
 
 /* KPI 카드 — Project Desk j-kpi (흰 그라데이션 + quarter-circle accent) */
 .kpi-card { background: linear-gradient(145deg, #fff, #F8FBFF); border: 1px solid #E3EDF7; border-radius: 16px; box-shadow: 0 10px 26px rgba(15,23,42,.07); overflow: hidden; }

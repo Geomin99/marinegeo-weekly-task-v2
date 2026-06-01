@@ -17,6 +17,7 @@ import {
   LayoutDashboard,
   Loader2,
   LogOut,
+  Mic,
   Plane,
   Plus,
   RefreshCw,
@@ -30,6 +31,7 @@ import { supabase } from "./supabaseClient";
 import LeaveView from "./LeaveView.jsx";
 import CenterView from "./CenterView.jsx";
 import InboxView from "./InboxView.jsx";
+import VoiceLogView from "./VoiceLogView.jsx";
 import { ErpHero } from "./ErpHero.jsx";
 
 const BRAND = {
@@ -554,6 +556,12 @@ function Sidebar({ view, setView, stats, centerStats, currentUser, onLogout, isO
             <Inbox size={17} />
             <span>받은편지함</span>
             {inboxCount > 0 && <span className="side-nav-count">{inboxCount}</span>}
+          </button>
+        )}
+        {isOwner && (
+          <button className={view === "voice" ? "active" : ""} onClick={() => setView("voice")}>
+            <Mic size={17} />
+            <span>업무 통화 로그</span>
           </button>
         )}
       </nav>
@@ -1115,7 +1123,7 @@ function LoginScreen() {
   );
 }
 
-const VALID_VIEWS = [...NAV_ITEMS.map((n) => n.id), "inbox"];
+const VALID_VIEWS = [...NAV_ITEMS.map((n) => n.id), "inbox", "voice"];
 function viewFromHash() {
   const h = (window.location.hash || "").replace(/^#\/?/, "");
   return VALID_VIEWS.includes(h) ? h : "dashboard";
@@ -1254,6 +1262,22 @@ function Workspace({ session }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchInbox();
   }, [fetchInbox]);
+
+  // 업무 통화 로그 (geomin99 전용)
+  const [voiceLogs, setVoiceLogs] = useState([]);
+  const fetchVoice = useCallback(async () => {
+    if (!isOwner) { setVoiceLogs([]); return; }
+    const { data, error } = await supabase
+      .from("voice_call_logs")
+      .select("*")
+      .is("deleted_at", null)
+      .order("call_date", { ascending: false });
+    setVoiceLogs(error ? [] : data || []);
+  }, [isOwner]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchVoice();
+  }, [fetchVoice]);
 
   // 대시보드 트리거: 누를 때마다 캘린더 동기화 + 전체 데이터 새로고침 (on-demand)
   const [triggering, setTriggering] = useState(false);
@@ -1479,6 +1503,9 @@ function Workspace({ session }) {
           )}
           {view === "inbox" && isOwner && (
             <InboxView drafts={inboxDrafts} onReload={fetchInbox} onNotice={showNotice} ownerId={session?.user?.id} />
+          )}
+          {view === "voice" && isOwner && (
+            <VoiceLogView logs={voiceLogs} loading={false} onReload={fetchVoice} onNotice={showNotice} ownerId={session?.user?.id} />
           )}
         </main>
       </div>
