@@ -19,6 +19,21 @@ const STATUS = {
 function fmtDate(s) { return s ? String(s).slice(0, 16).replace("T", " ") : ""; }
 function fmtSize(n) { return n ? (n / 1048576).toFixed(1) + "MB" : ""; }
 
+// 통화녹음 파일명에서 날짜·시간·상대 자동 추출 (예: "통화 녹음 김현우 부사장님_260528_140059.m4a")
+function parseFilename(name) {
+  const out = {};
+  const m = name.match(/(\d{2})(\d{2})(\d{2})[_\-.](\d{2})(\d{2})(\d{2})/);
+  if (m) {
+    const [, yy, mm, dd, hh, mi] = m;
+    out.call_date = `20${yy}-${mm}-${dd}T${hh}:${mi}`; // datetime-local 형식
+  }
+  let base = name.replace(/\.[^.]+$/, "");              // 확장자 제거
+  base = base.replace(/^\s*통화\s*녹음\s*/, "");          // "통화 녹음 " 접두 제거
+  base = base.replace(/[_\-\s]*\d{6}[_\-.]\d{6}.*$/, "").trim(); // 날짜_시간 이후 제거
+  if (base) { out.contact_person = base; out.title = `통화 - ${base}`; }
+  return out;
+}
+
 export default function VoiceLogView({ logs, loading, onReload, onNotice, ownerId }) {
   const fileRef = useRef(null);
   const [file, setFile] = useState(null);
@@ -32,8 +47,9 @@ export default function VoiceLogView({ logs, loading, onReload, onNotice, ownerI
     setBusy(true);
     try {
       const id = crypto.randomUUID();
-      const safeName = file.name.replace(/[^\w.\-가-힣 ]/g, "_");
-      const path = `${ownerId}/${id}/${safeName}`;
+      // 저장 키는 ASCII 안전값(한글·공백 키는 Storage가 거부). 원본 파일명은 DB(original_filename)에 보존.
+      const ext = (file.name.split(".").pop() || "dat").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8) || "dat";
+      const path = `${ownerId}/${id}/audio.${ext}`;
       const { error: upErr } = await supabase.storage.from("voice-calls")
         .upload(path, file, { contentType: file.type || "application/octet-stream", upsert: false });
       if (upErr) { onNotice?.(`업로드 실패: ${upErr.message}`, "error"); setBusy(false); return; }
@@ -89,7 +105,21 @@ export default function VoiceLogView({ logs, loading, onReload, onNotice, ownerI
           <div className="text-[13px] font-bold mb-3 flex items-center gap-1.5" style={{ color: "#142033" }}>
             <Mic size={15} /> 통화 음성 업로드
           </div>
-          <input ref={fileRef} type="file" accept={ACCEPT} onChange={(e) => setFile(e.target.files?.[0] || null)}
+          <input ref={fileRef} type="file" accept={ACCEPT}
+                 onChange={(e) => {
+                   const f = e.target.files?.[0] || null;
+                   setFile(f);
+                   if (f) {
+                     const p = parseFilename(f.name);
+                     setForm((cur) => ({
+                       title: cur.title || p.title || "",
+                       organization_name: cur.organization_name || "",
+                       contact_person: cur.contact_person || p.contact_person || "",
+                       phone_number: cur.phone_number || "",
+                       call_date: cur.call_date || p.call_date || "",
+                     }));
+                   }
+                 }}
                  className="block w-full text-[13px] mb-3" />
           {file && <div className="text-[12px] mb-3" style={{ color: "#475467" }}><FileAudio size={12} className="inline" /> {file.name} · {fmtSize(file.size)}</div>}
           <div className="grid grid-cols-2 gap-2 mb-3">
