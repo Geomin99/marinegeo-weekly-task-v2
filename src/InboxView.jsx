@@ -24,61 +24,42 @@ function fmt(s) { return s ? String(s).slice(0, 10) : ""; }
 
 function DraftCard({ d, busy, onStatus }) {
   const p = PRIO[d.priority] || PRIO.normal;
+  const done = d.status === "done" || d.status === "archived";
+  const strip = d.status === "done" ? "green" : d.status === "archived" ? "muted"
+    : d.priority === "urgent" ? "red" : d.priority === "high" ? "amber" : "blue";
+  const prioBadge = d.priority === "urgent" ? "red" : d.priority === "high" ? "amber" : "muted";
   return (
-    <div className="rounded-xl border bg-white p-4" style={{ borderColor: "#d9e3ee" }}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ background: p.bg, color: p.fg }}>{p.label}</span>
-          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ background: "#f1f5f9", color: "#475467" }}>
-            {CAT_LABEL[d.category] || "기타"}
-          </span>
-          {d.due_date && (
-            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: "#fff4ed", color: "#c4320a" }}>
-              <Clock size={11} /> 마감 {fmt(d.due_date)}
-            </span>
-          )}
+    <section className={`panel center-task strip-${strip}${done ? " is-done" : ""}`}>
+      <div className="center-task-main">
+        <div className="center-task-head">
+          <span className={`badge ${prioBadge}`}>{p.label}</span>
+          <span className="badge muted">{CAT_LABEL[d.category] || "기타"}</span>
+          {d.due_date && <span className="badge amber">마감 {fmt(d.due_date)}</span>}
+          {d.status === "done" && <span className="badge green">완료</span>}
+          {d.status === "archived" && <span className="badge muted">보관</span>}
         </div>
-        <a href={d.gmail_link} target="_blank" rel="noreferrer"
-           className="text-[12px] font-semibold inline-flex items-center gap-1 shrink-0" style={{ color: "#245f9a" }}>
-          원문 <ExternalLink size={12} />
-        </a>
+        <h3 className="center-task-title">{d.subject_masked}</h3>
+        <div className="center-task-meta">
+          {d.sender_name_masked && <span>보낸이 {d.sender_name_masked}</span>}
+          {d.sender_email_domain && <span>{d.sender_email_domain}</span>}
+          {d.received_at && <span>수신 {fmt(d.received_at)}</span>}
+        </div>
+        {d.summary_masked && <p className="center-task-note">{d.summary_masked}</p>}
       </div>
-
-      <div className="mt-2 font-bold text-[15px]" style={{ color: "#142033" }}>{d.subject_masked}</div>
-      {d.summary_masked && <div className="mt-1 text-[13px] leading-relaxed" style={{ color: "#475467" }}>{d.summary_masked}</div>}
-      <div className="mt-1.5 text-[11.5px]" style={{ color: "#94a3b8" }}>
-        {d.sender_name_masked}{d.sender_email_domain ? ` · ${d.sender_email_domain}` : ""} · 수신 {fmt(d.received_at)}
-      </div>
-
-      <div className="mt-3 flex items-center gap-2">
-        {d.status === "needs_review" ? (
-          <>
-            <button onClick={() => onStatus(d.id, "done")} disabled={busy}
-                    className="px-3 py-1.5 text-xs font-bold rounded-md text-white inline-flex items-center gap-1.5"
-                    style={{ background: "#1f3a5f", opacity: busy ? 0.6 : 1 }}>
-              <CheckCircle2 size={13} /> 완료
-            </button>
-            <button onClick={() => onStatus(d.id, "archived")} disabled={busy}
-                    className="px-3 py-1.5 text-xs font-semibold rounded-md inline-flex items-center gap-1.5 border"
-                    style={{ borderColor: "#d9e3ee", color: "#637083", background: "#fff", opacity: busy ? 0.6 : 1 }}>
-              <Archive size={13} /> 보관
-            </button>
-          </>
+      <div className="center-task-actions">
+        {done ? (
+          <button className="icon-btn" title="확인필요로 되돌리기" onClick={() => onStatus(d.id, "needs_review")} disabled={busy}><RotateCcw size={15} /></button>
         ) : (
-          <>
-            <span className="text-[11px] font-bold px-2 py-0.5 rounded-full"
-                  style={{ background: d.status === "done" ? "#dcfce7" : "#eceff3", color: d.status === "done" ? "#15803d" : "#475467" }}>
-              {d.status === "done" ? "완료" : "보관"}
-            </span>
-            <button onClick={() => onStatus(d.id, "needs_review")} disabled={busy}
-                    className="px-2.5 py-1 text-xs font-semibold rounded-md inline-flex items-center gap-1.5 border"
-                    style={{ borderColor: "#d9e3ee", color: "#637083", background: "#fff", opacity: busy ? 0.6 : 1 }}>
-              <RotateCcw size={12} /> 되돌리기
-            </button>
-          </>
+          <button className="icon-btn done" title="완료 처리" onClick={() => onStatus(d.id, "done")} disabled={busy}><CheckCircle2 size={16} /></button>
+        )}
+        {d.gmail_link && (
+          <a className="icon-btn" title="원문 메일 열기" href={d.gmail_link} target="_blank" rel="noreferrer"><Mail size={15} /></a>
+        )}
+        {!done && (
+          <button className="icon-btn" title="보관" onClick={() => onStatus(d.id, "archived")} disabled={busy}><Archive size={15} /></button>
         )}
       </div>
-    </div>
+    </section>
   );
 }
 
