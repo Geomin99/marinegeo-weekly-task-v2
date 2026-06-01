@@ -639,7 +639,7 @@ function leaveOverlaps(r, a, b) {
   return s && e && s <= b && e >= a;
 }
 
-function Dashboard({ entries, journalStats, centerTasks, leaveRequests, setView, onTrigger, triggering }) {
+function Dashboard({ entries, journalStats, centerTasks, leaveRequests, setView, onTrigger, triggering, inboxDrafts = [], isOwner = false }) {
   const today = useMemo(() => startOfToday(), []);
   const weekStart = useMemo(() => {
     const d = new Date(today);
@@ -783,6 +783,22 @@ function Dashboard({ entries, journalStats, centerTasks, leaveRequests, setView,
     [centerTasks],
   );
 
+  // 오늘의 리마인드 — 센터 마감(3일내)+받은편지함(owner 확인필요 높음/긴급)을 한 줄 리스트로
+  const centerNeed = useMemo(() => centerTasks.filter((t) => t.status === "확인필요").length, [centerTasks]);
+  const inboxNeed = isOwner ? (inboxDrafts || []).filter((d) => d.status === "needs_review").length : 0;
+  const reminders = useMemo(() => {
+    const out = [];
+    centerD
+      .filter((t) => t.due_date && t.status !== "제출완료" && t.status !== "보관" && t._d != null && t._d <= 3)
+      .forEach((t) => out.push({ view: "center", sub: "센터", label: t.title, dday: t._d }));
+    if (isOwner) {
+      (inboxDrafts || [])
+        .filter((d) => d.status === "needs_review" && (d.priority === "urgent" || d.priority === "high"))
+        .forEach((d) => out.push({ view: "inbox", sub: "받은편지함", label: d.subject_masked, dday: d.due_date ? ddayFrom(d.due_date, today) : null }));
+    }
+    return out.sort((a, b) => (a.dday == null ? 9999 : a.dday) - (b.dday == null ? 9999 : b.dday)).slice(0, 6);
+  }, [centerD, inboxDrafts, isOwner, today]);
+
   return (
     <div className="dashboard">
       {/* ── Project Desk 히어로 ── */}
@@ -807,6 +823,37 @@ function Dashboard({ entries, journalStats, centerTasks, leaveRequests, setView,
           </>
         )}
       />
+
+      {/* ── 오늘의 리마인드 ── */}
+      <section className="panel dash-briefing">
+        <div className="panel-title-row">
+          <h3><span className="panel-ic ic-red"><AlertCircle size={15} /></span> 오늘의 리마인드 · {todayLabel()}</h3>
+          <button className="btn btn-ghost" onClick={onTrigger} disabled={triggering}>
+            <RefreshCw size={13} className={triggering ? "erp-spin" : ""} /> 새로고침
+          </button>
+        </div>
+        <div className="brief-chips">
+          <button className="brief-chip" onClick={() => setView("center")}>센터 확인필요 <b>{centerNeed}</b></button>
+          <button className="brief-chip" onClick={() => setView("center")}>마감 초과 <b>{kpi.overdue}</b></button>
+          {isOwner && <button className="brief-chip" onClick={() => setView("inbox")}>받은편지함 <b>{inboxNeed}</b></button>}
+          <button className="brief-chip" onClick={() => setView("journal")}>주간 미제출 <b>{Math.max(kpi.expected - kpi.submitted, 0)}</b></button>
+          <button className="brief-chip" onClick={() => setView("leave")}>오늘 부재 <b>{leaveToday.length}</b></button>
+        </div>
+        {reminders.length === 0 ? (
+          <div className="dash-empty">지금 급히 챙길 항목이 없습니다. 👍</div>
+        ) : (
+          <ul className="brief-list">
+            {reminders.map((r, i) => (
+              <li key={i} onClick={() => setView(r.view)}>
+                <span className={"brief-dot " + (r.dday != null && r.dday < 0 ? "d-red" : r.dday != null && r.dday <= 3 ? "d-amber" : "d-blue")} />
+                <span className="brief-sub">{r.sub}</span>
+                <span className="brief-label">{r.label}</span>
+                <span className="brief-dday">{r.dday == null ? "" : r.dday < 0 ? `${-r.dday}일 초과` : r.dday === 0 ? "오늘" : `D-${r.dday}`}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       {/* ── KPI 스트립 ── */}
       <div className="dash-kpis">
@@ -1393,6 +1440,8 @@ function Workspace({ session }) {
               setView={setView}
               onTrigger={runTrigger}
               triggering={triggering}
+              inboxDrafts={inboxDrafts}
+              isOwner={isOwner}
             />
           )}
           {view === "journal" && (
