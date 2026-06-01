@@ -49,6 +49,23 @@ Deno.serve(async (req) => {
       return Response.json({ ok: true });
     }
 
+    if (body.action === "summary") {
+      await sb.from("voice_call_logs").update({
+        summary_text: body.summary_text ?? null,
+        summary_json: body.summary_json ?? null,
+        requests: body.requests ?? null,
+        decisions: body.decisions ?? null,
+        action_items: body.action_items ?? null,
+        key_points: body.key_points ?? null,
+        due_dates: body.due_dates ?? null,
+        follow_up_required: !!body.follow_up_required,
+        extraction_model: "hermes(gpt-5.5)",
+        is_confirmed: false,
+        status: "completed", processed_at: now, updated_at: now,
+      }).eq("id", body.id);
+      return Response.json({ ok: true });
+    }
+
     if (body.action === "fail") {
       await sb.from("voice_call_logs").update({
         status: "failed", error_message: (body.error_message || "").slice(0, 400),
