@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Mic, Upload, FileAudio, Trash2, RotateCcw, ChevronDown, ChevronUp, ShieldAlert, CalendarPlus } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { ErpHero } from "./ErpHero.jsx";
@@ -103,12 +103,22 @@ export default function VoiceLogView({ logs, loading, onReload, onNotice, ownerI
 
   const list = (logs || []).filter((r) => !r.deleted_at);
 
+  // 전사 진행 중(pending/processing) 건이 있으면 6초마다 자동 갱신 → 완료되면 화면 자동 반영
+  useEffect(() => {
+    const active = list.some((r) => r.status === "pending" || r.status === "processing");
+    if (!active) return;
+    const iv = setInterval(() => onReload?.(), 6000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logs]);
+
   return (
     <section className="module-frame">
       <ErpHero
         title="업무 통화 로그"
         meta={`geomin99 전용 · 통화 ${list.length}건 · 전사=로컬 whisper · 요약=토심이`}
         tags={["개인 전용", "음성 비공개 보관", "외부전송 없음"]}
+        actions={<button onClick={onReload}><RotateCcw size={14} /> 새로고침</button>}
       />
 
       <div className="px-1 py-4">
