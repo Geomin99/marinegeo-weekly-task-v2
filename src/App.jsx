@@ -512,7 +512,7 @@ function Sidebar({ view, setView, stats, centerStats, currentUser, onLogout, isO
   return (
     <aside className="app-sidebar">
       <button className="brand-lockup" onClick={() => setView("dashboard")} title="대시보드로 이동">
-        <img src="/logo.jpg" alt="Marine & Geo" />
+        <img src="/logo.png" alt="Marine & Geo" />
         <div>
           <strong>MARINE &amp; GEO · ERP</strong>
           <span>Internal Management System / v001</span>
@@ -1090,7 +1090,7 @@ function LoginScreen() {
     <div className="login-shell" style={{ "--brand-navy": BRAND.navy, "--brand-blue": BRAND.blue, "--brand-accent": BRAND.accent }}>
       <form className="login-card" onSubmit={submit}>
         <div className="login-brand">
-          <img src="/logo.jpg" alt="Marine & Geo" />
+          <img src="/logo.png" alt="Marine & Geo" />
           <div>
             <strong>MARINE &amp; GEO · ERP</strong>
             <span>Internal Management System / v001</span>
