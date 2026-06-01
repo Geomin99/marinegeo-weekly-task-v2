@@ -442,6 +442,11 @@ export default function LeaveView() {
             setModalOpen(false);
             reloadAll();
           }}
+          onBackToGeneral={(extEvt) => {
+            // 일반→신청 변환 모달에서 '일반 일정'으로 되돌림 (양방향)
+            setModalOpen(false);
+            setGenEvent(extEvt);
+          }}
         />
       )}
 
@@ -1032,6 +1037,33 @@ function addDaysStr(dateStr, delta) {
   } catch { return dateStr; }
 }
 
+// 모든 일정 모달 공통 — 상단 유형 토글(휴가·출장 신청 ↔ 일반 일정). 양방향 전환을 일관 제공.
+function EventTypeToggle({ value, onSelectLeave, onSelectGeneral, disabled }) {
+  return (
+    <div className="rounded-lg p-3" style={{ background: THEME.accentSoft, border: `1px solid ${THEME.accent}33` }}>
+      <div className="flex items-center gap-1.5 text-xs font-bold mb-2" style={{ color: THEME.navy }}>
+        <ArrowRightLeft size={14} style={{ color: THEME.accent }} /> 유형
+      </div>
+      <div className="flex gap-2">
+        <button type="button" onClick={onSelectLeave} disabled={disabled}
+                className="flex-1 px-3 py-2 text-xs font-bold rounded-md"
+                style={value === "leave"
+                  ? { background: THEME.navy, color: "#fff" }
+                  : { background: "#fff", color: THEME.sub, border: `1px solid ${THEME.line}` }}>
+          휴가·출장 신청
+        </button>
+        <button type="button" onClick={onSelectGeneral} disabled={disabled}
+                className="flex-1 px-3 py-2 text-xs font-bold rounded-md"
+                style={value === "general"
+                  ? { background: THEME.accent, color: "#fff" }
+                  : { background: "#fff", color: THEME.sub, border: `1px solid ${THEME.line}` }}>
+          일반 일정
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function GeneralEventModal({ event, onClose, onUpdated, onDeleted, onConvert }) {
   // 널 가드 — 이벤트/식별자 없으면 렌더 자체를 하지 않는다(흰화면 방지).
   if (!event || !event.id) return null;
@@ -1095,7 +1127,7 @@ function GeneralEventModal({ event, onClose, onUpdated, onDeleted, onConvert }) 
              style={{ background: THEME.navy, color: "#fff" }}>
           <div className="flex items-center gap-2">
             <CalendarIcon size={18} />
-            <h3 className="font-bold">MGEO 캘린더 일정 편집</h3>
+            <h3 className="font-bold">일정 수정</h3>
           </div>
           <button onClick={onClose} className="hover:opacity-70"><X size={18} /></button>
         </div>
@@ -1107,19 +1139,10 @@ function GeneralEventModal({ event, onClose, onUpdated, onDeleted, onConvert }) 
               {err}
             </div>
           )}
-          {/* ★ 상단 강조 배너 — 일반 일정 ↔ 휴가·출장 신청 변환 동선 (가시성) */}
-          <div className="rounded-lg p-3 flex items-center justify-between gap-3"
-               style={{ background: THEME.accentSoft, border: `1px solid ${THEME.accent}33` }}>
-            <div className="flex items-start gap-2 text-xs leading-relaxed" style={{ color: THEME.navy }}>
-              <Info size={16} style={{ color: THEME.accent, marginTop: 1, flexShrink: 0 }} />
-              <span>이 일정은 <b>MGEO 캘린더 일반 일정</b>입니다.<br />휴가·출장으로 관리하려면 변환하세요.</span>
-            </div>
-            <button onClick={() => onConvert?.(event)}
-                    className="shrink-0 px-3 py-2 text-xs font-bold rounded-md text-white flex items-center gap-1.5 shadow-sm"
-                    style={{ background: THEME.accent }}>
-              <ArrowRightLeft size={13} /> 휴가·출장 신청으로 변환
-            </button>
-          </div>
+          {/* ★ 공통 유형 토글 — '휴가·출장 신청' 선택 시 신청 변환 모달로 전환 */}
+          <EventTypeToggle value="general"
+                           onSelectLeave={() => onConvert?.(event)}
+                           onSelectGeneral={() => {}} />
           <div className="grid grid-cols-3 gap-3">
             <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>제목</label>
             <input value={title} onChange={(e) => setTitle(e.target.value)}
@@ -1180,7 +1203,7 @@ function GeneralEventModal({ event, onClose, onUpdated, onDeleted, onConvert }) 
           <div className="flex items-center gap-2">
             <button onClick={onClose} disabled={saving}
                     className="px-4 py-2 text-sm font-semibold rounded-md border"
-                    style={{ borderColor: THEME.line, color: THEME.sub }}>닫기</button>
+                    style={{ borderColor: THEME.line, color: THEME.sub }}>취소</button>
             <button onClick={handleSave} disabled={saving}
                     className="px-4 py-2 text-sm font-semibold rounded-md text-white shadow-md"
                     style={{ background: THEME.navy }}>{saving ? "저장 중…" : "저장"}</button>
@@ -1194,7 +1217,7 @@ function GeneralEventModal({ event, onClose, onUpdated, onDeleted, onConvert }) 
 // ─────────────────────────────────────────────────────────────
 // 신청·수정 모달
 // ─────────────────────────────────────────────────────────────
-function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSaved, onExternalDeleted, onConvertedToGeneral }) {
+function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSaved, onExternalDeleted, onConvertedToGeneral, onBackToGeneral }) {
   const isEdit = !!init?.request;
   const existing = init?.request;
   const ext = init?.externalEvent;  // 외부 MGEO 이벤트 → 변환 모드
@@ -1294,6 +1317,18 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
     extEvt.id = r.eventId;
     onConvertedToGeneral?.(extEvt);
     onClose();
+  }
+
+  // 공통 유형 토글 동작 (모든 케이스에서 일관). value: 'leave' | 'general'
+  const typeValue = createAsGeneral ? "general" : "leave";
+  function selectLeaveType() {
+    if (canChooseType) { setCreateAsGeneral(false); return; }
+    // isEdit/ext는 이미 '신청' 측 → no-op
+  }
+  function selectGeneralType() {
+    if (canChooseType) { setCreateAsGeneral(true); return; }       // 신규: 임시 전환
+    if (isEdit) { setErrText(""); setConfirmKind("toGeneral"); return; }  // 기존 신청 → 일반(저장 시 확정 confirm)
+    if (ext) { onBackToGeneral?.(ext); return; }                   // 변환 취소 → 일반 일정 편집으로 (양방향)
   }
 
   async function handleSave() {
@@ -1460,7 +1495,7 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
              style={{ background: THEME.navy, color: "#fff" }}>
           <div className="flex items-center gap-2">
             {isTrip ? <Plane size={18} /> : <CalendarIcon size={18} />}
-            <h3 className="font-bold">{isEdit ? "신청 수정" : (ext ? "캘린더 일정 → 사이트 신청 변환" : "신규 신청")}</h3>
+            <h3 className="font-bold">{(isEdit || ext) ? "일정 수정" : "일정 등록"}</h3>
           </div>
           <button onClick={onClose} className="hover:opacity-70"><X size={18} /></button>
         </div>
@@ -1473,44 +1508,21 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
               {errText}
             </div>
           )}
-          {ext && (
-            <div className="rounded-md p-3 text-xs"
-                 style={{ background: "#fff7e6", border: "1px solid #f3c98a", color: "#7a4a00" }}>
-              <div className="font-bold mb-1">📥 MGEO 캘린더 원본 이벤트를 사이트 신청으로 변환</div>
-              <div>원본: <span className="font-semibold">{ext.summary}</span></div>
-              <div>저장하면 사이트 데이터로 등록 + 캘린더 이벤트도 사이트 형식(`[직원] 종류`)으로 갱신됩니다.</div>
-            </div>
-          )}
-          {/* ★ 신규 등록 유형 선택 — 휴가·출장 신청 ↔ 일반 일정 (양방향 신규 진입점) */}
-          {canChooseType && (
-            <div className="rounded-lg p-3" style={{ background: THEME.accentSoft, border: `1px solid ${THEME.accent}33` }}>
-              <div className="flex items-center gap-1.5 text-xs font-bold mb-2" style={{ color: THEME.navy }}>
-                <ArrowRightLeft size={14} style={{ color: THEME.accent }} /> 등록 유형
-              </div>
-              <div className="flex gap-2">
-                <button type="button" onClick={() => setCreateAsGeneral(false)}
-                        className="flex-1 px-3 py-2 text-xs font-bold rounded-md"
-                        style={!createAsGeneral
-                          ? { background: THEME.navy, color: "#fff" }
-                          : { background: "#fff", color: THEME.sub, border: `1px solid ${THEME.line}` }}>
-                  휴가·출장 신청
-                </button>
-                <button type="button" onClick={() => setCreateAsGeneral(true)}
-                        className="flex-1 px-3 py-2 text-xs font-bold rounded-md"
-                        style={createAsGeneral
-                          ? { background: THEME.accent, color: "#fff" }
-                          : { background: "#fff", color: THEME.sub, border: `1px solid ${THEME.line}` }}>
-                  일반 일정
-                </button>
-              </div>
-              <div className="text-xs mt-2" style={{ color: THEME.sub }}>
-                {createAsGeneral
-                  ? "MGEO 캘린더 일반 일정으로만 등록합니다 (연차 차감·승인 흐름 없음)."
-                  : "휴가·출장 신청으로 등록합니다 (연차·승인 관리)."}
-              </div>
-            </div>
-          )}
-          {/* 일반 일정 등록 시 제목 입력 */}
+          {/* ★ 공통 유형 토글 — 모든 모달에서 휴가·출장 신청 ↔ 일반 일정 양방향 전환 */}
+          <EventTypeToggle value={typeValue}
+                           onSelectLeave={selectLeaveType}
+                           onSelectGeneral={selectGeneralType}
+                           disabled={saving} />
+          <div className="text-xs px-1" style={{ color: THEME.sub }}>
+            {typeValue === "general"
+              ? "MGEO 캘린더 일반 일정으로 저장합니다 (연차 차감·승인 흐름 없음)."
+              : ext
+                ? "저장하면 휴가·출장 신청으로 등록 + 캘린더 이벤트도 사이트 형식([직원] 종류)으로 갱신됩니다."
+                : isEdit
+                  ? "휴가·출장 신청입니다. 위에서 '일반 일정'을 누르면 신청 기록·연차 차감이 해제됩니다."
+                  : "휴가·출장 신청으로 저장합니다 (연차·승인 관리)."}
+          </div>
+          {/* 일반 일정 등록 시 제목 입력 (신규에서 일반 선택 시) */}
           {canChooseType && createAsGeneral && (
             <div className="grid grid-cols-3 gap-3">
               <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>제목</label>
@@ -1518,21 +1530,6 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
                      placeholder="예: 거래처 미팅, 자료 백업"
                      className="col-span-2 px-3 py-2 border rounded-md outline-none"
                      style={{ borderColor: THEME.line }} />
-            </div>
-          )}
-          {/* ★ 신청 → 일반 일정 변환 (양방향) */}
-          {isEdit && (
-            <div className="rounded-lg p-3 flex items-center justify-between gap-3"
-                 style={{ background: THEME.accentSoft, border: `1px solid ${THEME.accent}33` }}>
-              <div className="flex items-start gap-2 text-xs leading-relaxed" style={{ color: THEME.navy }}>
-                <Info size={16} style={{ color: THEME.accent, marginTop: 1, flexShrink: 0 }} />
-                <span>이건 <b>휴가·출장 신청</b>입니다.<br />일반 캘린더 일정으로 바꾸면 신청 기록·연차 차감이 해제됩니다.</span>
-              </div>
-              <button onClick={() => { setErrText(""); setConfirmKind("toGeneral"); }} disabled={saving}
-                      className="shrink-0 px-3 py-2 text-xs font-bold rounded-md flex items-center gap-1.5"
-                      style={{ color: THEME.accent, border: `1px solid ${THEME.accent}`, background: "#fff" }}>
-                <ArrowRightLeft size={13} /> 일반 일정으로 변환
-              </button>
             </div>
           )}
           {!createAsGeneral && (
@@ -1707,7 +1704,7 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
             <button onClick={handleDeleteExternal} disabled={saving}
                     className="flex items-center gap-1 text-xs font-semibold hover:underline"
                     style={{ color: "#dc2626" }}>
-              <Trash2 size={13} /> MGEO 캘린더에서 삭제
+              <Trash2 size={13} /> 삭제
             </button>
           ) : <span />}
           <div className="flex gap-2">
@@ -1719,7 +1716,7 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
             <button onClick={createAsGeneral ? handleSaveGeneral : handleSave} disabled={saving}
                     className="px-4 py-2 text-sm font-semibold rounded-md text-white"
                     style={{ background: createAsGeneral ? THEME.accent : THEME.navy }}>
-              {saving ? "저장 중..." : createAsGeneral ? "일반 일정 등록" : isEdit ? "수정" : "신청"}
+              {saving ? "저장 중..." : "저장"}
             </button>
           </div>
         </div>
