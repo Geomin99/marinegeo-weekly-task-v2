@@ -510,7 +510,7 @@ function JournalView({ loading, searchQuery, setSearchQuery, authorFilter, setAu
   );
 }
 
-function Sidebar({ view, setView, stats, centerStats, currentUser, onLogout, isOwner, inboxCount }) {
+function Sidebar({ view, setView, stats, centerStats, currentUser, onLogout, isOwner, inboxCount, voiceCount }) {
   return (
     <aside className="app-sidebar">
       <button className="brand-lockup" onClick={() => setView("dashboard")} title="대시보드로 이동">
@@ -562,6 +562,7 @@ function Sidebar({ view, setView, stats, centerStats, currentUser, onLogout, isO
           <button className={view === "voice" ? "active" : ""} onClick={() => setView("voice")}>
             <Mic size={17} />
             <span>업무 통화 로그</span>
+            {voiceCount > 0 && <span className="side-nav-count">{voiceCount}</span>}
           </button>
         )}
       </nav>
@@ -1451,7 +1452,8 @@ function Workspace({ session }) {
   return (
     <div className="app-shell" style={{ "--brand-navy": BRAND.navy, "--brand-blue": BRAND.blue, "--brand-accent": BRAND.accent }}>
       <Sidebar view={view} setView={setView} stats={stats} centerStats={centerStats} currentUser={currentUser} onLogout={handleLogout}
-               isOwner={isOwner} inboxCount={inboxDrafts.filter((d) => d.status === "needs_review").length} />
+               isOwner={isOwner} inboxCount={inboxDrafts.filter((d) => d.status === "needs_review").length}
+               voiceCount={voiceLogs.filter((v) => v.follow_up_required).length} />
       <div className="app-main">
         <Topbar view={view} stats={stats} />
         <main className="content-area">

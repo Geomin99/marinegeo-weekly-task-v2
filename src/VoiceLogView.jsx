@@ -1,7 +1,8 @@
 import { useState, useRef } from "react";
-import { Mic, Upload, FileAudio, Trash2, RotateCcw, ChevronDown, ChevronUp, ShieldAlert } from "lucide-react";
+import { Mic, Upload, FileAudio, Trash2, RotateCcw, ChevronDown, ChevronUp, ShieldAlert, CalendarPlus } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { ErpHero } from "./ErpHero.jsx";
+import { gcalReady, createAllDayEvent } from "./gcal";
 
 // 업무 통화 로그 (geomin99 전용). 업로드 → 비공개 Storage(voice-calls) → voice_call_logs(pending).
 // 전사(로컬 whisper 워커)·요약(토심이)은 후속 단계에서 status를 채운다.
@@ -80,6 +81,24 @@ export default function VoiceLogView({ logs, loading, onReload, onNotice, ownerI
       onReload?.();
     } catch (e) { onNotice?.(`삭제 실패: ${e.message}`, "error"); }
     setBusy(false);
+  }
+
+  async function addToCalendar(row) {
+    if (!gcalReady()) { onNotice?.("구글 미연동 — 휴가·출장 탭에서 먼저 연동하세요.", "error"); return; }
+    const dues = Array.isArray(row.due_dates) ? row.due_dates.filter((d) => d && d.date) : [];
+    if (!dues.length) { onNotice?.("등록할 마감이 없습니다.", "info"); return; }
+    setBusy(true);
+    let ok = 0;
+    for (const d of dues) {
+      const res = await createAllDayEvent({
+        summary: `[통화] ${d.label || row.title}`,
+        description: `업무 통화 로그 · ${row.organization_name || ""} ${row.contact_person || ""}`.trim(),
+        date: d.date,
+      });
+      if (res.ok) ok++;
+    }
+    setBusy(false);
+    onNotice?.(ok ? `캘린더에 ${ok}건 추가했습니다.` : "캘린더 추가 실패", ok ? "success" : "error");
   }
 
   const list = (logs || []).filter((r) => !r.deleted_at);
@@ -175,6 +194,11 @@ export default function VoiceLogView({ logs, loading, onReload, onNotice, ownerI
                         <p className="text-[12.5px]" style={{ color: "#94a3b8" }}>전사 대기/진행 중입니다 — 회사 PC 워커가 처리하면 전사·요약이 여기에 채워집니다.</p>
                       ) : (
                         <>
+                          {Array.isArray(r.due_dates) && r.due_dates.length > 0 && (
+                            <button className="btn btn-ghost" style={{ marginBottom: 10 }} onClick={() => addToCalendar(r)} disabled={busy}>
+                              <CalendarPlus size={13} /> 마감을 캘린더에 추가 ({r.due_dates.length})
+                            </button>
+                          )}
                           {r.summary_text && (<div className="mb-3"><div className="text-[12px] font-bold mb-1" style={{ color: "#245f9a" }}>요약</div><p className="text-[13px] whitespace-pre-wrap" style={{ color: "#334155" }}>{r.summary_text}</p></div>)}
                           {r.transcript_text && (<div><div className="text-[12px] font-bold mb-1" style={{ color: "#245f9a" }}>전사 원문</div><p className="text-[12.5px] whitespace-pre-wrap leading-relaxed" style={{ color: "#475467", maxHeight: 260, overflow: "auto" }}>{r.transcript_text}</p></div>)}
                           {!r.summary_text && !r.transcript_text && <p className="text-[12.5px]" style={{ color: "#94a3b8" }}>전사 결과가 아직 없습니다.</p>}
