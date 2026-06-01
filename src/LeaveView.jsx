@@ -278,30 +278,35 @@ export default function LeaveView({ viewer } = {}) {
   const [modalInit, setModalInit] = useState(null);  // {date} or {request}
   const [genEvent, setGenEvent] = useState(null);  // 일반 MGEO 이벤트 편집 (휴가·출장과 분리)
   const [showBalances, setShowBalances] = useState(false);  // 개인정보 보호 — 기본 숨김
+  const [calEvents, setCalEvents] = useState([]);  // 달력 그리드용(공개 뷰 — 전원, 개인정보 컬럼 제외)
+  const [peek, setPeek] = useState(null);  // 다른 직원 일정 클릭 시 공개 정보만 표시
 
   // 초기 로드
   useEffect(() => { reloadAll(); }, []);
 
   async function reloadAll() {
     setLoading(true);
-    const [t, r, b] = await Promise.all([
+    const [t, r, b, cal] = await Promise.all([
       supabase.from("leave_types").select("*").eq("is_active", true).order("sort_order"),
-      supabase.from("leave_requests").select("*").order("start_date", { ascending: false }),
+      supabase.from("leave_requests").select("*").order("start_date", { ascending: false }),  // RLS: 본인/대표만
       supabase.from("annual_leave_balances").select("*").order("author"),
+      supabase.from("calendar_events_public").select("*").order("start_date", { ascending: false }),  // 달력용 전원 공유(공개 컬럼만)
     ]);
     if (t.data) setLeaveTypes(t.data);
     if (r.data) setRequests(r.data);
     if (b.data) setBalances(b.data);
+    if (cal.data) setCalEvents(cal.data);
     setLoading(false);
   }
 
   // 월별 그리드 셀
   const cells = useMemo(() => getMonthGrid(year, month), [year, month]);
 
-  // 합쳐진 이벤트 (사이트 신청 + 외부 MGEO 캘린더) — 가로 spanning bar용
+  // 합쳐진 이벤트 (달력 공개 뷰 = 전원 + 외부 MGEO 캘린더) — 가로 spanning bar용
+  // 달력은 calEvents(전원, 개인정보 컬럼 제외)에서, 목록·편집은 requests(RLS)에서
   const allEvents = useMemo(() => {
-    const knownGcalIds = new Set(requests.map(r => r.google_calendar_event_id).filter(Boolean));
-    const fromRequests = requests.map(r => ({
+    const knownGcalIds = new Set(calEvents.map(r => r.google_calendar_event_id).filter(Boolean));
+    const fromRequests = calEvents.map(r => ({
       ...r,
       _start: r.start_date,
       _end: r.end_date || r.start_date,  // inclusive
@@ -315,7 +320,7 @@ export default function LeaveView({ viewer } = {}) {
         return { ...ev, _start: ev.start_date, _end: ymd(endDt) };
       });
     return [...fromRequests, ...fromExternal];
-  }, [requests, externalEvents]);
+  }, [calEvents, externalEvents]);
 
   // 직원별 잔여 (annual_leave_balances + 사용 합산)
   const balanceWithUsage = useMemo(() => {
@@ -355,11 +360,19 @@ export default function LeaveView({ viewer } = {}) {
     setModalOpen(true);
   }
 
-  function openEdit(request) {
+  async function openEdit(request) {
     if (request.is_external) {
-      // 일반 MGEO 이벤트 → 휴가 신청 변환이 아니라 "일정 편집" 모달로 분기 (포테토뭉 권고)
+      // 일반 MGEO 이벤트 → "일정 편집" 모달로 분기 (포테토뭉 권고)
       setGenEvent(request);
       return;
+    }
+    // 달력 클릭은 공개 뷰(calEvents) 객체 → 본인/대표면 원본(RLS) 재조회해 전체 필드로 편집
+    const mine = canSeeAll || (viewerName && request.author === viewerName);
+    if (!mine) { setPeek(request); return; }  // 다른 직원 일정 → 공개 정보만
+    if (request.id && request.memo === undefined) {
+      const { data } = await supabase.from("leave_requests").select("*").eq("id", request.id).single();
+      if (data) { setModalInit({ request: data }); setModalOpen(true); return; }
+      setPeek(request); return;  // 재조회 실패(권한·삭제) → 공개 정보만
     }
     setModalInit({ request });
     setModalOpen(true);
@@ -505,6 +518,32 @@ export default function LeaveView({ viewer } = {}) {
           onDeleted={(id) => setExternalEvents(prev => prev.filter(e => e.id !== id))}
           onConvert={(ev) => { setGenEvent(null); setModalInit({ externalEvent: ev }); setModalOpen(true); }}
         />
+      )}
+
+      {/* ── 다른 직원 일정: 공개 정보만 (개인정보 보호) ───────────── */}
+      {peek && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+             style={{ background: "rgba(15, 23, 42, 0.5)" }} onClick={() => setPeek(null)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden"
+               onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 flex items-center justify-between" style={{ background: THEME.navy, color: "#fff" }}>
+              <div className="flex items-center gap-2"><CalendarIcon size={18} /><h3 className="font-bold">일정 정보</h3></div>
+              <button onClick={() => setPeek(null)} className="hover:opacity-70"><X size={18} /></button>
+            </div>
+            <div className="p-5 space-y-2 text-sm">
+              <div className="rounded-md p-3 text-xs" style={{ background: THEME.accentSoft, color: THEME.navy }}>
+                다른 직원의 일정이라 <b>공개 정보만</b> 표시됩니다 (개인정보 보호).
+              </div>
+              <div className="flex justify-between"><span style={{ color: THEME.sub }}>성명</span><span className="font-semibold">{peek.author}</span></div>
+              <div className="flex justify-between"><span style={{ color: THEME.sub }}>종류</span><span className="font-semibold">{peek.leave_type_name}{peek.destination ? ` · ${peek.destination}` : ""}</span></div>
+              <div className="flex justify-between"><span style={{ color: THEME.sub }}>기간</span><span className="font-semibold">{peek._start || peek.start_date}{(peek._end || peek.end_date) && (peek._end || peek.end_date) !== (peek._start || peek.start_date) ? ` ~ ${peek._end || peek.end_date}` : ""}</span></div>
+              <div className="flex justify-between"><span style={{ color: THEME.sub }}>상태</span><span className="font-semibold">{statusKo(peek.status)}</span></div>
+            </div>
+            <div className="px-5 py-3 flex justify-end border-t" style={{ borderColor: THEME.line }}>
+              <button onClick={() => setPeek(null)} className="px-4 py-2 text-sm font-semibold rounded-md text-white" style={{ background: THEME.navy }}>닫기</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
     </CalErrorBoundary>
