@@ -13,6 +13,7 @@ import {
   Clock3,
   FileText,
   Filter,
+  Inbox,
   LayoutDashboard,
   Loader2,
   LogOut,
@@ -28,6 +29,7 @@ import {
 import { supabase } from "./supabaseClient";
 import LeaveView from "./LeaveView.jsx";
 import CenterView from "./CenterView.jsx";
+import InboxView from "./InboxView.jsx";
 import { ErpHero } from "./ErpHero.jsx";
 
 const BRAND = {
@@ -506,7 +508,7 @@ function JournalView({ loading, searchQuery, setSearchQuery, authorFilter, setAu
   );
 }
 
-function Sidebar({ view, setView, stats, centerStats, currentUser, onLogout }) {
+function Sidebar({ view, setView, stats, centerStats, currentUser, onLogout, isOwner, inboxCount }) {
   return (
     <aside className="app-sidebar">
       <button className="brand-lockup" onClick={() => setView("dashboard")} title="대시보드로 이동">
@@ -547,6 +549,13 @@ function Sidebar({ view, setView, stats, centerStats, currentUser, onLogout }) {
             </button>
           );
         })}
+        {isOwner && (
+          <button className={view === "inbox" ? "active" : ""} onClick={() => setView("inbox")}>
+            <Inbox size={17} />
+            <span>받은편지함</span>
+            {inboxCount > 0 && <span className="side-nav-count">{inboxCount}</span>}
+          </button>
+        )}
       </nav>
 
       <section className="panel compact side-summary">
@@ -1059,7 +1068,7 @@ function LoginScreen() {
   );
 }
 
-const VALID_VIEWS = NAV_ITEMS.map((n) => n.id);
+const VALID_VIEWS = [...NAV_ITEMS.map((n) => n.id), "inbox"];
 function viewFromHash() {
   const h = (window.location.hash || "").replace(/^#\/?/, "");
   return VALID_VIEWS.includes(h) ? h : "dashboard";
@@ -1182,6 +1191,23 @@ function Workspace({ session }) {
     fetchEntries(true);
   }, [fetchEntries]);
 
+  // 받은편지함 업무 초안 (A안) — 토뭉이님(geomin99) 전용. RLS로 owner 행만 조회됨.
+  const isOwner = (session?.user?.email || "").toLowerCase() === "geomin99@gmail.com";
+  const [inboxDrafts, setInboxDrafts] = useState([]);
+  const fetchInbox = useCallback(async () => {
+    if (!isOwner) { setInboxDrafts([]); return; }
+    const { data, error } = await supabase
+      .from("inbox_action_drafts")
+      .select("*")
+      .is("deleted_at", null)
+      .order("received_at", { ascending: false });
+    setInboxDrafts(error ? [] : data || []);
+  }, [isOwner]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchInbox();
+  }, [fetchInbox]);
+
   // 대시보드 트리거: 누를 때마다 캘린더 동기화 + 전체 데이터 새로고침 (on-demand)
   const [triggering, setTriggering] = useState(false);
   const runTrigger = useCallback(async () => {
@@ -1196,7 +1222,7 @@ function Workspace({ session }) {
           .order("start_date", { ascending: true });
         if (data) cal = await syncLeaveRequests(data);
       }
-      await Promise.all([fetchEntries(), fetchCenter(), fetchLeave()]);
+      await Promise.all([fetchEntries(), fetchCenter(), fetchLeave(), fetchInbox()]);
       let msg;
       if (cal && cal.ok) {
         msg = `동기화 완료 · 캘린더 신규 ${cal.pushed}·갱신 ${cal.updated}` +
@@ -1212,7 +1238,7 @@ function Workspace({ session }) {
     } finally {
       setTriggering(false);
     }
-  }, [fetchEntries, fetchCenter, fetchLeave, showNotice]);
+  }, [fetchEntries, fetchCenter, fetchLeave, fetchInbox, showNotice]);
 
   async function handleSave(id, data, isNew) {
     if (isNew) {
@@ -1353,7 +1379,8 @@ function Workspace({ session }) {
 
   return (
     <div className="app-shell" style={{ "--brand-navy": BRAND.navy, "--brand-blue": BRAND.blue, "--brand-accent": BRAND.accent }}>
-      <Sidebar view={view} setView={setView} stats={stats} centerStats={centerStats} currentUser={currentUser} onLogout={handleLogout} />
+      <Sidebar view={view} setView={setView} stats={stats} centerStats={centerStats} currentUser={currentUser} onLogout={handleLogout}
+               isOwner={isOwner} inboxCount={inboxDrafts.filter((d) => d.status === "needs_review").length} />
       <div className="app-main">
         <Topbar view={view} stats={stats} />
         <main className="content-area">
@@ -1400,6 +1427,9 @@ function Workspace({ session }) {
                 onNotice={showNotice}
               />
             </section>
+          )}
+          {view === "inbox" && isOwner && (
+            <InboxView drafts={inboxDrafts} onReload={fetchInbox} onNotice={showNotice} />
           )}
         </main>
       </div>
