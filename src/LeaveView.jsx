@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { ErpHero } from "./ErpHero.jsx";
-import { syncLeaveRequests, needsCalendarSync, updateCalendarEvent, createAllDayEvent } from "./gcal";
+import { syncLeaveRequests, needsCalendarSync, updateCalendarEvent, createAllDayEvent, createRawEvent } from "./gcal";
 
 // 흰화면 크래시 방지: 캘린더/모달에서 예외가 나도 앱 전체가 죽지 않게 감싼다.
 class CalErrorBoundary extends Component {
@@ -1262,6 +1262,40 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
     [selectedType, days]
   );
 
+  // 신규 등록 시 "휴가·출장 신청" vs "일반 일정" 선택 (양방향 변환의 신규 진입점)
+  const [createAsGeneral, setCreateAsGeneral] = useState(false);
+  const [genTitle, setGenTitle] = useState("");
+  const canChooseType = !isEdit && !ext;  // 신규 신청 모달에서만 등록유형 선택 노출
+
+  // 신규 → 일반 일정으로 등록: leave_requests 없이 MGEO 캘린더에만 생성
+  async function handleSaveGeneral() {
+    const t = (genTitle || "").trim();
+    if (!t) { setErrText("제목을 입력해 주세요."); return; }
+    setSaving(true); setErrText("");
+    const desc = memo || "";
+    let body, extEvt;
+    if (isAllDay) {
+      const endDt = new Date(endDate); endDt.setDate(endDt.getDate() + 1);
+      const exEnd = ymd(endDt);
+      body = { summary: t, description: desc, start: { date: startDate }, end: { date: exEnd } };
+      extEvt = { is_external: true, is_all_day: true, start_time: null, id: null, summary: t, description: desc, start_date: startDate, end_date: exEnd, author: "(MGEO 캘린더)", leave_type_name: t, status: "external" };
+    } else {
+      body = {
+        summary: t, description: desc,
+        start: { dateTime: `${startDate}T${startTime}:00+09:00`, timeZone: "Asia/Seoul" },
+        end: { dateTime: `${endDate}T${endTime}:00+09:00`, timeZone: "Asia/Seoul" },
+      };
+      let gridEnd = endDate; if (gridEnd === startDate) { const d = new Date(startDate); d.setDate(d.getDate() + 1); gridEnd = ymd(d); }
+      extEvt = { is_external: true, is_all_day: false, start_time: startTime, id: null, summary: t, description: desc, start_date: startDate, end_date: gridEnd, author: "(MGEO 캘린더)", leave_type_name: t, status: "external" };
+    }
+    const r = await createRawEvent(body);
+    setSaving(false);
+    if (!r.ok) { setErrText("일반 일정 등록 실패: " + (r.reason || "") + " (구글 캘린더 연동·권한 확인)"); return; }
+    extEvt.id = r.eventId;
+    onConvertedToGeneral?.(extEvt);
+    onClose();
+  }
+
   async function handleSave() {
     if (!author.trim()) { setErrText("성명을 입력해 주세요."); return; }
     if (!selectedType) { setErrText("휴가 종류를 선택해 주세요."); return; }
@@ -1447,6 +1481,45 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
               <div>저장하면 사이트 데이터로 등록 + 캘린더 이벤트도 사이트 형식(`[직원] 종류`)으로 갱신됩니다.</div>
             </div>
           )}
+          {/* ★ 신규 등록 유형 선택 — 휴가·출장 신청 ↔ 일반 일정 (양방향 신규 진입점) */}
+          {canChooseType && (
+            <div className="rounded-lg p-3" style={{ background: THEME.accentSoft, border: `1px solid ${THEME.accent}33` }}>
+              <div className="flex items-center gap-1.5 text-xs font-bold mb-2" style={{ color: THEME.navy }}>
+                <ArrowRightLeft size={14} style={{ color: THEME.accent }} /> 등록 유형
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setCreateAsGeneral(false)}
+                        className="flex-1 px-3 py-2 text-xs font-bold rounded-md"
+                        style={!createAsGeneral
+                          ? { background: THEME.navy, color: "#fff" }
+                          : { background: "#fff", color: THEME.sub, border: `1px solid ${THEME.line}` }}>
+                  휴가·출장 신청
+                </button>
+                <button type="button" onClick={() => setCreateAsGeneral(true)}
+                        className="flex-1 px-3 py-2 text-xs font-bold rounded-md"
+                        style={createAsGeneral
+                          ? { background: THEME.accent, color: "#fff" }
+                          : { background: "#fff", color: THEME.sub, border: `1px solid ${THEME.line}` }}>
+                  일반 일정
+                </button>
+              </div>
+              <div className="text-xs mt-2" style={{ color: THEME.sub }}>
+                {createAsGeneral
+                  ? "MGEO 캘린더 일반 일정으로만 등록합니다 (연차 차감·승인 흐름 없음)."
+                  : "휴가·출장 신청으로 등록합니다 (연차·승인 관리)."}
+              </div>
+            </div>
+          )}
+          {/* 일반 일정 등록 시 제목 입력 */}
+          {canChooseType && createAsGeneral && (
+            <div className="grid grid-cols-3 gap-3">
+              <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>제목</label>
+              <input value={genTitle} onChange={(e) => setGenTitle(e.target.value)}
+                     placeholder="예: 거래처 미팅, 자료 백업"
+                     className="col-span-2 px-3 py-2 border rounded-md outline-none"
+                     style={{ borderColor: THEME.line }} />
+            </div>
+          )}
           {/* ★ 신청 → 일반 일정 변환 (양방향) */}
           {isEdit && (
             <div className="rounded-lg p-3 flex items-center justify-between gap-3"
@@ -1462,6 +1535,7 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
               </button>
             </div>
           )}
+          {!createAsGeneral && (
           <div className="grid grid-cols-3 gap-3">
             <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>성명</label>
             <select value={author} onChange={(e) => setAuthor(e.target.value)}
@@ -1472,6 +1546,8 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
               ))}
             </select>
           </div>
+          )}
+          {!createAsGeneral && (
           <div className="grid grid-cols-3 gap-3">
             <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>종류</label>
             <select value={leaveTypeId} onChange={(e) => setLeaveTypeId(e.target.value)}
@@ -1482,6 +1558,7 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
               ))}
             </select>
           </div>
+          )}
           {/* 종일 토글 */}
           <div className="grid grid-cols-3 gap-3">
             <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>일정 유형</label>
@@ -1525,7 +1602,7 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
           </div>
 
           {/* 출장 전용 필드 */}
-          {isTrip && (
+          {isTrip && !createAsGeneral && (
             <>
               <div className="grid grid-cols-3 gap-3">
                 <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>출장지</label>
@@ -1551,6 +1628,7 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
             </>
           )}
 
+          {!createAsGeneral && (
           <div className="grid grid-cols-3 gap-3">
             <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>상태</label>
             <select value={status} onChange={(e) => setStatus(e.target.value)}
@@ -1561,7 +1639,8 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
               ))}
             </select>
           </div>
-          {(status === "approved" || status === "rejected") && (
+          )}
+          {!createAsGeneral && (status === "approved" || status === "rejected") && (
             <div className="grid grid-cols-3 gap-3">
               <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>승인자</label>
               <select value={approver} onChange={(e) => setApprover(e.target.value)}
@@ -1595,6 +1674,7 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
           )}
 
           {/* 요약 */}
+          {!createAsGeneral && (
           <div className="rounded-md p-3 text-xs" style={{ background: THEME.accentSoft }}>
             <div className="flex items-center justify-between">
               <span style={{ color: THEME.sub }}>총 일수</span>
@@ -1611,6 +1691,7 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
               </span>
             </div>
           </div>
+          )}
         </div>
 
         {/* 푸터 */}
@@ -1635,10 +1716,10 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
                     style={{ borderColor: THEME.line, color: THEME.sub }}>
               취소
             </button>
-            <button onClick={handleSave} disabled={saving}
+            <button onClick={createAsGeneral ? handleSaveGeneral : handleSave} disabled={saving}
                     className="px-4 py-2 text-sm font-semibold rounded-md text-white"
-                    style={{ background: THEME.navy }}>
-              {saving ? "저장 중..." : isEdit ? "수정" : "신청"}
+                    style={{ background: createAsGeneral ? THEME.accent : THEME.navy }}>
+              {saving ? "저장 중..." : createAsGeneral ? "일반 일정 등록" : isEdit ? "수정" : "신청"}
             </button>
           </div>
         </div>

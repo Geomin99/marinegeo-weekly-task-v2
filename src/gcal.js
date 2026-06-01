@@ -75,6 +75,24 @@ export async function createAllDayEvent({ summary, description, date, colorId })
   }
 }
 
+// MGEO 캘린더에 임의 이벤트 1건 생성(종일·시간지정 공용). body는 Google events.insert 형식.
+export async function createRawEvent(body) {
+  const token = loadGcalToken();
+  const calId = loadGcalCalendarId();
+  if (!token || !calId) return { ok: false, reason: "not_ready" };
+  try {
+    const r = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`,
+      { method: "POST", headers: { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    );
+    const d = await r.json().catch(() => ({}));
+    if (d.id) return { ok: true, eventId: d.id };
+    return { ok: false, reason: d.error?.message || `status_${r.status}` };
+  } catch (e) {
+    return { ok: false, reason: e.message };
+  }
+}
+
 // MGEO 캘린더 이벤트 직접 수정(제목·시간·설명). body는 Google events.patch 형식.
 export async function updateCalendarEvent(eventId, body) {
   const token = loadGcalToken();
