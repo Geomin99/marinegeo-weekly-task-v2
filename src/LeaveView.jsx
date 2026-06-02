@@ -82,21 +82,23 @@ function eventCategory(ev) {
   return "leave";  // 휴가·반차·예비군 등 연차 계열
 }
 
-// 상태 한글 매핑
+// 상태 한글 매핑 (DB는 pending 유지, UI 표시만 '신청' — 포테토뭉 권고)
 const STATUS_LABEL = {
-  pending:   "대기",
+  pending:   "신청",
   approved:  "승인",
   rejected:  "반려",
   cancelled: "취소",
 };
 function statusKo(s) { return STATUS_LABEL[s] || s; }
 
+// 대표(승인자)만 보는 상태 변경 옵션
 const STATUS_OPTIONS = [
-  { value: "pending",   label: "대기" },
+  { value: "pending",   label: "신청" },
   { value: "approved",  label: "승인" },
   { value: "rejected",  label: "반려" },
   { value: "cancelled", label: "취소" },
 ];
+const APPROVER_NAME = "여은민";  // 승인자는 대표 단독
 
 const DEFAULT_AUTHORS = ["김찬수", "최승표", "여은민"];
 
@@ -489,6 +491,7 @@ export default function LeaveView({ viewer } = {}) {
           init={modalInit}
           leaveTypes={leaveTypes}
           authors={balances.map(b => b.author)}
+          isOwner={canSeeAll}
           holidays={holidays}
           onClose={() => setModalOpen(false)}
           onSaved={() => { setModalOpen(false); reloadAll(); }}
@@ -1066,6 +1069,16 @@ function CalendarGrid({ cells, events, onCellClick, onEventClick, today }) {
                 </div>
               ))}
             </div>
+            {/* '오늘' 테두리 — 이벤트 막대보다 위에 그려 가려지지 않게 (포테토뭉 권고: 별도 ring 레이어) */}
+            {(() => {
+              const tc = week.findIndex(c => ymd(c.date) === todayStr);
+              if (tc < 0) return null;
+              return (
+                <div className="absolute pointer-events-none"
+                     style={{ left: `${(tc / 7) * 100}%`, width: `${100 / 7}%`, top: 0, bottom: 0,
+                              boxShadow: `inset 0 0 0 2px ${THEME.accent}`, zIndex: 20 }} />
+              );
+            })()}
           </div>
         );
       })}
@@ -1306,12 +1319,15 @@ function GeneralEventModal({ event, onClose, onUpdated, onDeleted, onConvert }) 
 // ─────────────────────────────────────────────────────────────
 // 신청·수정 모달
 // ─────────────────────────────────────────────────────────────
-function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSaved, onExternalDeleted, onConvertedToGeneral, onBackToGeneral }) {
+function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSaved, onExternalDeleted, onConvertedToGeneral, onBackToGeneral, isOwner }) {
   const isEdit = !!init?.request;
   const existing = init?.request;
   const ext = init?.externalEvent;  // 외부 MGEO 이벤트 → 변환 모드
   // authors prop이 없거나 비어 있으면 기본 직원 명단 사용
-  const authorOptions = (authors && authors.length) ? authors : DEFAULT_AUTHORS;
+  // 신청자(성명)에는 직원 + 대표(여은민) 모두 포함 (대표도 본인 일정 등록)
+  const authorOptions = Array.from(new Set([...((authors && authors.length) ? authors : DEFAULT_AUTHORS), APPROVER_NAME]));
+  // 상태 변경(승인/반려/취소)은 대표가 기존 신청을 수정할 때만. 신청 단계는 '신청'(pending) 고정.
+  const canSetStatus = isOwner && isEdit;
 
   // 외부 변환 시 종류 추정: summary에 "회의"·"외근"·"휴가" 등 키워드 있으면 매칭
   const extDefaultTypeId = useMemo(() => {
@@ -1717,25 +1733,31 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
           {!createAsGeneral && (
           <div className="grid grid-cols-3 gap-3">
             <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>상태</label>
-            <select value={status} onChange={(e) => setStatus(e.target.value)}
-                    className="col-span-2 px-3 py-2 border rounded-md outline-none"
-                    style={{ borderColor: THEME.line }}>
-              {STATUS_OPTIONS.map(o => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
+            {canSetStatus ? (
+              <select value={status} onChange={(e) => setStatus(e.target.value)}
+                      className="col-span-2 px-3 py-2 border rounded-md outline-none"
+                      style={{ borderColor: THEME.line }}>
+                {STATUS_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            ) : (
+              // 신청 단계 — 상태는 '신청' 고정 (승인/반려/취소는 대표만)
+              <div className="col-span-2 px-3 py-2 rounded-md font-semibold"
+                   style={{ background: THEME.accentSoft, color: THEME.navy, border: `1px solid ${THEME.line}` }}>
+                {statusKo(status)}{!isEdit && " (제출 시 신청으로 등록됩니다)"}
+              </div>
+            )}
           </div>
           )}
-          {!createAsGeneral && (status === "approved" || status === "rejected") && (
+          {!createAsGeneral && canSetStatus && (status === "approved" || status === "rejected") && (
             <div className="grid grid-cols-3 gap-3">
               <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>승인자</label>
               <select value={approver} onChange={(e) => setApprover(e.target.value)}
                       className="col-span-2 px-3 py-2 border rounded-md outline-none"
                       style={{ borderColor: THEME.line }}>
                 <option value="">선택 안 함</option>
-                {authorOptions.map(name => (
-                  <option key={name} value={name}>{name}</option>
-                ))}
+                <option value={APPROVER_NAME}>{APPROVER_NAME}</option>
               </select>
             </div>
           )}

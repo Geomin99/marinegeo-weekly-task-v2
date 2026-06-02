@@ -114,7 +114,7 @@ export async function updateCalendarEvent(eventId, body) {
 // ─────────────────────────────────────────────────────────────
 // 휴가·출장 → MGEO 캘린더 동기화 (LeaveView 자동 + 대시보드 트리거 공용)
 // ─────────────────────────────────────────────────────────────
-const LEAVE_STATUS_KO = { pending: "대기", approved: "승인", rejected: "반려", cancelled: "취소" };
+const LEAVE_STATUS_KO = { pending: "신청", approved: "승인", rejected: "반려", cancelled: "취소" };
 
 // 캘린더에 반영되는 필드만 모아 signature 생성 → DB calendar_sync_signature 와 다르면 dirty
 export function calendarSignature(req) {
