@@ -557,7 +557,7 @@ function Sidebar({ view, setView, stats, centerStats, currentUser, onLogout, isO
       <nav className="side-nav">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
-          const count = item.id === "journal" ? stats.totalEntries
+          const count = item.id === "journal" ? stats.thisMonthEntries
             : item.id === "center" ? centerStats.needCheck
             : 0;
           return (
@@ -1451,12 +1451,16 @@ function Workspace({ session }) {
     const thisWeekSubmitted = entries.filter((entry) => isThisWeek(entry.thisWeekDate)).map((entry) => entry.author).filter(Boolean);
     const authorCount = Object.keys(authorStats).length;
     const submittedRate = authorCount > 0 ? Math.round((new Set(thisWeekSubmitted).size / authorCount) * 100) : 0;
+    const now = new Date();
+    const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;  // 이번달 YYYY-MM
+    const thisMonthEntries = entries.filter((e) => (e.thisWeekDate || "").slice(0, 7) === monthPrefix).length;
     return {
       authorStats,
       authorCount,
       submittedRate,
       thisWeekSubmitted: [...new Set(thisWeekSubmitted)],
       totalEntries: entries.length,
+      thisMonthEntries,
     };
   }, [entries]);
 
