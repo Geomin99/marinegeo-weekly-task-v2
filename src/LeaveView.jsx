@@ -724,6 +724,8 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents, onHolidays
           map.set(ymd(d), name);
         }
       }
+      // 사이드바 미니 캘린더 등 다른 화면이 쓰도록 캐시 (휴일·공휴일 표시 공유)
+      try { localStorage.setItem("mgeo_holidays_v1", JSON.stringify([...map.entries()])); } catch { /* noop */ }
       onHolidaysFetched?.(map);
     } catch (e) {
       // silent

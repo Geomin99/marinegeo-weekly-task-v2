@@ -181,6 +181,13 @@ function MiniCalendar() {
   const today = new Date();
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
+  // 공휴일·대체공휴일 (캘린더 탭이 구글에서 받아 localStorage에 캐시한 값). 휴일/공휴일만 색 표시.
+  const holidays = useMemo(() => {
+    try { const raw = localStorage.getItem("mgeo_holidays_v1"); if (raw) return new Map(JSON.parse(raw)); }
+    catch { /* noop */ }
+    return new Map();
+  }, []);
+  const pad2 = (n) => String(n).padStart(2, "0");
   const firstDay = new Date(viewYear, viewMonth, 1);
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
   const prevMonthLastDay = new Date(viewYear, viewMonth, 0).getDate();
@@ -225,9 +232,18 @@ function MiniCalendar() {
       </div>
       <div className="mini-calendar-grid">
         {cells.map((cell, idx) => {
-          const isToday = cell.type === "current" && viewYear === today.getFullYear() && viewMonth === today.getMonth() && cell.day === today.getDate();
+          const isCur = cell.type === "current";
+          const isToday = isCur && viewYear === today.getFullYear() && viewMonth === today.getMonth() && cell.day === today.getDate();
+          const col = idx % 7;
+          const dateStr = isCur ? `${viewYear}-${pad2(viewMonth + 1)}-${pad2(cell.day)}` : null;
+          const holName = dateStr ? holidays.get(dateStr) : null;
+          const isHoliday = !!holName || (isCur && col === 0);   // 공휴일 또는 일요일
+          const isSat = isCur && col === 6;
           return (
-            <span key={`${cell.type}-${idx}`} className={`${cell.type !== "current" ? "dim" : ""} ${isToday ? "today" : ""}`}>
+            <span key={`${cell.type}-${idx}`}
+                  className={`${cell.type !== "current" ? "dim" : ""} ${isToday ? "today" : ""}`}
+                  title={holName || undefined}
+                  style={isCur && !isToday ? { color: isHoliday ? "#dc2626" : isSat ? "#245f9a" : undefined, fontWeight: holName ? 700 : undefined } : undefined}>
               {cell.day}
             </span>
           );
