@@ -276,7 +276,7 @@ export default function LeaveView({ viewer } = {}) {
   const [balances, setBalances] = useState([]);
   const [loading, setLoading] = useState(true);
   const [externalEvents, setExternalEvents] = useState([]);  // MGEO 캘린더 원본 이벤트 (읽기 표시용)
-  const [holidays, setHolidays] = useState(() => new Set());  // 대한민국 공휴일·대체공휴일 (YYYY-MM-DD)
+  const [holidays, setHolidays] = useState(() => new Map());  // YYYY-MM-DD → 공휴일명 (대체공휴일 포함)
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalInit, setModalInit] = useState(null);  // {date} or {request}
@@ -431,6 +431,7 @@ export default function LeaveView({ viewer } = {}) {
         onCellClick={openNew}
         onEventClick={openEdit}
         today={today}
+        holidays={holidays}
       />
 
       {/* ── 범례 ──────────────────────────────── */}
@@ -711,18 +712,19 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents, onHolidays
       );
       const data = await r.json();
       if (data.error) return;  // 휴일 fetch 실패는 silent (토·일은 여전히 인식)
-      const set = new Set();
+      const map = new Map();  // YYYY-MM-DD → 공휴일명 (달력 표시 + .has()로 휴가계산 호환)
       for (const ev of (data.items || [])) {
         // 종일 이벤트만 (date), 다일 이벤트는 start~end 사이 모두 포함
         if (!ev.start?.date) continue;
+        const name = (ev.summary || "공휴일").trim();
         const start = new Date(ev.start.date);
         const end = ev.end?.date ? new Date(ev.end.date) : new Date(ev.start.date);
         // Google all-day end는 exclusive
         for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
-          set.add(ymd(d));
+          map.set(ymd(d), name);
         }
       }
-      onHolidaysFetched?.(set);
+      onHolidaysFetched?.(map);
     } catch (e) {
       // silent
     }
@@ -939,7 +941,7 @@ function layoutWeek(week, events) {
   return placed;
 }
 
-function CalendarGrid({ cells, events, onCellClick, onEventClick, today }) {
+function CalendarGrid({ cells, events, onCellClick, onEventClick, today, holidays }) {
   const todayStr = ymd(today);
   const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
   const MAX_SLOTS = 4;
@@ -979,28 +981,36 @@ function CalendarGrid({ cells, events, onCellClick, onEventClick, today }) {
               const dateStr = ymd(cell.date);
               const isToday = dateStr === todayStr;
               const dow = cell.date.getDay();
-              const textColor = dow === 0 ? "#dc2626" : dow === 6 ? THEME.blue : THEME.ink;
+              const holidayName = holidays?.get?.(dateStr) || null;  // 공휴일·대체공휴일명
+              const textColor = (dow === 0 || holidayName) ? "#dc2626" : dow === 6 ? THEME.blue : THEME.ink;
               return (
                 <div key={ci}
                      onClick={() => onCellClick(cell.date)}
                      className="border-r cursor-pointer hover:bg-slate-50 transition"
                      style={{
                        borderColor: THEME.line2,
-                       background: cell.other ? "#fafbfc" : isToday ? THEME.accentSoft : "#fff",
+                       background: cell.other ? "#fafbfc" : isToday ? THEME.accentSoft : holidayName ? "#fef2f3" : "#fff",
                        opacity: cell.other ? 0.45 : 1,
                        padding: "8px 8px 0 8px",
                        boxShadow: isToday ? `inset 0 0 0 2px ${THEME.accent}` : "none",
                      }}>
-                  <div className="flex items-center justify-between">
-                    <span className={"text-[15px] " + (isToday ? "font-bold" : "font-semibold")}
+                  <div className="flex items-center justify-between gap-1">
+                    <span className={"text-[15px] shrink-0 " + (isToday ? "font-bold" : "font-semibold")}
                           style={{ color: textColor }}>
                       {cell.date.getDate()}
                     </span>
+                    {holidayName && !isToday && (
+                      <span className="text-[10px] font-semibold truncate" style={{ color: "#dc2626" }}
+                            title={holidayName}>{holidayName}</span>
+                    )}
                     {isToday && (
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0"
                             style={{ background: THEME.accent, color: "#fff" }}>오늘</span>
                     )}
                   </div>
+                  {holidayName && isToday && (
+                    <div className="text-[10px] font-semibold truncate" style={{ color: "#dc2626" }} title={holidayName}>{holidayName}</div>
+                  )}
                 </div>
               );
             })}
@@ -1376,7 +1386,7 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
 
   const days = useMemo(() => daysBetween(startDate, endDate), [startDate, endDate]);
   const holidayInRange = useMemo(
-    () => countHolidaysInRange(startDate, endDate, holidays || new Set()),
+    () => countHolidaysInRange(startDate, endDate, holidays || new Map()),
     [startDate, endDate, holidays]
   );
   const showCompensatoryNotice =
@@ -1477,7 +1487,7 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
     if (savedRow && selectedType?.name === "출장" && COMPENSATORY_TARGETS.has(savedRow.author)) {
       try {
         const year = new Date(savedRow.start_date).getFullYear();
-        await recalculateCompensatoryGrant(savedRow.author, year, holidays || new Set());
+        await recalculateCompensatoryGrant(savedRow.author, year, holidays || new Map());
       } catch (e) { console.warn("보상 누적 재계산 실패:", e); }
     }
 
@@ -1505,7 +1515,7 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
     const wasYear = existing?.start_date ? new Date(existing.start_date).getFullYear() : null;
     const { error } = await supabase.from("leave_requests").delete().eq("id", existing.id);
     if (!error && wasTrip && wasAuthor && wasYear && COMPENSATORY_TARGETS.has(wasAuthor)) {
-      try { await recalculateCompensatoryGrant(wasAuthor, wasYear, holidays || new Set()); }
+      try { await recalculateCompensatoryGrant(wasAuthor, wasYear, holidays || new Map()); }
       catch (e) { console.warn("보상 누적 재계산 실패:", e); }
     }
     setSaving(false);
@@ -1569,7 +1579,7 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
       setSaving(false); setErrText("변환 실패(신청 삭제): " + error.message); return;
     }
     if (wasTrip && wasAuthor && wasYear && COMPENSATORY_TARGETS.has(wasAuthor)) {
-      try { await recalculateCompensatoryGrant(wasAuthor, wasYear, holidays || new Set()); }
+      try { await recalculateCompensatoryGrant(wasAuthor, wasYear, holidays || new Map()); }
       catch (e) { console.warn("보상 누적 재계산 실패:", e); }
     }
     // 3) 즉시 반영용 external 이벤트 객체 (end는 exclusive로 환산)
