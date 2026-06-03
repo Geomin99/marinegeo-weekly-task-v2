@@ -41,6 +41,7 @@ export default function VoiceLogView({ logs, loading, onReload, onNotice, ownerI
   const [form, setForm] = useState({ title: "", organization_name: "", contact_person: "", phone_number: "", call_date: "" });
   const [busy, setBusy] = useState(false);
   const [openId, setOpenId] = useState(null);
+  const [confirmRow, setConfirmRow] = useState(null);  // 삭제 확인 (브라우저 confirm 금지 — 회사 모달)
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   async function handleUpload() {
@@ -72,7 +73,7 @@ export default function VoiceLogView({ logs, loading, onReload, onNotice, ownerI
   }
 
   async function handleDelete(row) {
-    if (!window.confirm) {/* 회사 confirm은 추후 */}
+    setConfirmRow(null);
     setBusy(true);
     try {
       if (row.storage_path) await supabase.storage.from("voice-calls").remove([row.storage_path]);
@@ -195,7 +196,7 @@ export default function VoiceLogView({ logs, loading, onReload, onNotice, ownerI
                       <button className="icon-btn" title="상세" onClick={() => setOpenId(open ? null : r.id)}>
                         {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
                       </button>
-                      <button className="icon-btn danger" title="삭제" onClick={() => handleDelete(r)} disabled={busy}><Trash2 size={15} /></button>
+                      <button className="icon-btn danger" title="삭제" onClick={() => setConfirmRow(r)} disabled={busy}><Trash2 size={15} /></button>
                     </div>
                   </div>
                   {open && (
@@ -222,6 +223,20 @@ export default function VoiceLogView({ logs, loading, onReload, onNotice, ownerI
           </div>
         )}
       </div>
+
+      {/* 삭제 확인 (브라우저 confirm 금지 — 회사 모달) */}
+      {confirmRow && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.55)" }} onClick={() => setConfirmRow(null)}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 20, width: "min(420px,100%)", boxShadow: "0 18px 50px rgba(0,0,0,.3)" }}>
+            <h3 style={{ margin: 0, color: "var(--mg-navy)", fontSize: 17, fontWeight: 800 }}>통화 기록을 삭제할까요?</h3>
+            <p style={{ margin: "8px 0 0", color: "var(--mg-sub)", fontSize: 13 }}>"{confirmRow.title}" 항목을 보관 처리합니다. 목록에서 사라집니다.</p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button onClick={() => setConfirmRow(null)} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid var(--mg-line)", background: "#fff", color: "var(--mg-sub)", fontWeight: 600, cursor: "pointer" }}>취소</button>
+              <button onClick={() => handleDelete(confirmRow)} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #dc2626", background: "#dc2626", color: "#fff", fontWeight: 700, cursor: "pointer" }}>삭제</button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

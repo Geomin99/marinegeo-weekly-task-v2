@@ -165,10 +165,16 @@ export default function MeetingView({ session, viewer, onNotice }) {
           await supabase.rpc("meeting_soft_delete", { p_id: meetingId });
           throw new Error(`음성 업로드 실패: ${upErr.message}`);
         }
-        await supabase.from("meeting_files").insert({
+        const { error: fErr } = await supabase.from("meeting_files").insert({
           id: fileId, meeting_id: meetingId, kind: "audio", storage_path: path,
           original_filename: file.name, mime_type: file.type || null, size_bytes: file.size, uploaded_by: email,
         });
+        if (fErr) {
+          // 파일 행 기록 실패 → 업로드한 음성·방금 만든 회의 정리(고아 방지)
+          await supabase.storage.from("meeting-audio").remove([path]);
+          await supabase.rpc("meeting_soft_delete", { p_id: meetingId });
+          throw new Error(`첨부 기록 실패: ${fErr.message}`);
+        }
       }
 
       const rows = parseParticipants(form.participants).map(p => ({ ...p, meeting_id: meetingId }));
