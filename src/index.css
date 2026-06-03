@@ -1317,6 +1317,10 @@ button.brand-lockup:hover {
 .tone-mint .kpi-accent { background: var(--mg-teal); }
 .tone-mint .kpi-icon { background: #d6f5ec; color: var(--mg-success); }
 .tone-mint .kpi-value { color: var(--mg-success); }
+/* 중립 — 위험 지표가 0건일 때 경고색 대신 사용 */
+.tone-slate .kpi-accent { background: #94a3b8; }
+.tone-slate .kpi-icon { background: #eef2f7; color: #64748b; }
+.tone-slate .kpi-value { color: #64748b; }
 
 /* 패널 위계 + 헤더 컬러 아이콘 배지 */
 .dashboard .panel { border-radius: 10px; box-shadow: 0 8px 24px rgba(20, 32, 51, 0.06); }

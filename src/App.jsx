@@ -624,24 +624,6 @@ function Sidebar({ view, setView, stats, centerStats, currentUser, onLogout, isO
   );
 }
 
-const VIEW_TITLES = { inbox: "받은편지함", voice: "업무 통화 로그", meeting: "회의록", staffnotes: "업무 메모" };
-function Topbar({ view, stats }) {
-  const current = NAV_ITEMS.find((item) => item.id === view);
-  const title = current?.label || VIEW_TITLES[view] || "대시보드";
-  return (
-    <header className="app-topbar">
-      <div>
-        <p className="eyebrow">Marine & Geo · {todayLabel()}</p>
-        <h1>{title}</h1>
-      </div>
-      <div className="topbar-stats">
-        <span><Users size={15} /> 작성자 {stats.authorCount}명</span>
-        <span><FileText size={15} /> 일지 {stats.totalEntries}건</span>
-        <span><Check size={15} /> 이번 주 {stats.thisWeekSubmitted.length}건</span>
-      </div>
-    </header>
-  );
-}
 
 const DASH_ACTION_STATUSES = ["신규", "확인필요", "자료준비", "승인대기"];
 const DASH_CENTER_STATUS_ORDER = ["신규", "확인필요", "자료준비", "승인대기", "제출완료", "보관"];
@@ -848,8 +830,10 @@ function Dashboard({ entries, journalStats, centerTasks, leaveRequests, setView,
         meta={`통합 운영 현황 · 기준일 ${todayLabel()} · 마감 초과 ${kpi.overdue} · 센터 긴급 ${kpi.urgent} · 주간업무 ${kpi.submitted}/${kpi.expected} · 이번 주 부재 ${kpi.absentWeek}`}
         tags={[
           "운영 중",
-          "이번 주",
           "Supabase 연결",
+          `작성자 ${journalStats.authorCount}명`,
+          `일지 ${journalStats.totalEntries}건`,
+          `이번 주 ${journalStats.thisWeekSubmitted.length}건`,
           ...(kpi.overdue > 0 ? [{ label: `마감 초과 ${kpi.overdue}`, hot: true }] : []),
         ]}
         actions={(
@@ -942,12 +926,12 @@ function Dashboard({ entries, journalStats, centerTasks, leaveRequests, setView,
 
       {/* ── KPI 스트립 ── */}
       <div className="dash-kpis">
-        <button className="kpi-card tone-red" onClick={() => setView("center")}>
+        <button className={`kpi-card ${kpi.urgent > 0 ? "tone-red" : "tone-slate"}`} onClick={() => setView("center")}>
           <span className="kpi-accent" />
           <span className="kpi-icon"><AlertCircle size={18} /></span>
           <span className="kpi-body"><strong className="kpi-value">{kpi.urgent}</strong><span className="kpi-label">센터 긴급 대응</span></span>
         </button>
-        <button className="kpi-card tone-redstrong" onClick={() => setView("center")}>
+        <button className={`kpi-card ${kpi.overdue > 0 ? "tone-redstrong" : "tone-slate"}`} onClick={() => setView("center")}>
           <span className="kpi-accent" />
           <span className="kpi-icon"><Clock3 size={18} /></span>
           <span className="kpi-body"><strong className="kpi-value">{kpi.overdue}</strong><span className="kpi-label">마감 초과</span></span>
@@ -1587,7 +1571,6 @@ function Workspace({ session }) {
                isOwner={isOwner} inboxCount={inboxDrafts.filter((d) => d.status === "needs_review").length}
                voiceCount={voiceLogs.filter((v) => v.follow_up_required).length} staffCount={staffCount} />
       <div className="app-main">
-        <Topbar view={view} stats={stats} />
         <main className="content-area">
           {view === "dashboard" && (
             <Dashboard
