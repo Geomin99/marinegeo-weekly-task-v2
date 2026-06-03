@@ -161,8 +161,8 @@ export default function MeetingView({ session, viewer, onNotice }) {
         const { error: upErr } = await supabase.storage.from("meeting-audio")
           .upload(path, file, { contentType: file.type || "application/octet-stream", upsert: false });
         if (upErr) {
-          // 업로드 실패 → 방금 만든 회의 롤백(보관)
-          await supabase.from("meetings").update({ deleted_at: new Date().toISOString() }).eq("id", meetingId);
+          // 업로드 실패 → 방금 만든 회의 롤백(보관) — RPC로 soft-delete
+          await supabase.rpc("meeting_soft_delete", { p_id: meetingId });
           throw new Error(`음성 업로드 실패: ${upErr.message}`);
         }
         await supabase.from("meeting_files").insert({
@@ -186,7 +186,8 @@ export default function MeetingView({ session, viewer, onNotice }) {
   async function doDelete(row) {
     setConfirmDel(null); setBusy(true);
     try {
-      const { error } = await supabase.from("meetings").update({ deleted_at: new Date().toISOString() }).eq("id", row.id);
+      // soft-delete는 SECURITY DEFINER RPC로 (SELECT 정책 deleted_at IS NULL 충돌 회피)
+      const { error } = await supabase.rpc("meeting_soft_delete", { p_id: row.id });
       if (error) throw error;
       onNotice?.("삭제(보관)되었습니다.", "success"); reload();
     } catch (e) { onNotice?.(`삭제 실패: ${e.message}`, "error"); }

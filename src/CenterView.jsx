@@ -214,10 +214,8 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
     const row = confirmTask;
     setConfirmTask(null);
     if (!row) return;
-    const { error } = await supabase
-      .from("center_tasks")
-      .update({ deleted_at: new Date().toISOString() })
-      .eq("id", row.id);
+    // soft-delete는 SECURITY DEFINER RPC로 (SELECT 정책 deleted_at IS NULL과의 충돌 회피)
+    const { error } = await supabase.rpc("center_task_soft_delete", { p_id: row.id });
     if (error) { notify(`삭제 실패: ${error.message}`, "error"); return; }
     notify("보관 처리(삭제)되었습니다.", "success");
     reload();
