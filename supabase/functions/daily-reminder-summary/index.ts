@@ -74,12 +74,29 @@ Deno.serve(async (req) => {
     const todayAbsent = [...new Set(activeLeaves.filter((r) => overlaps(r, todayStr, todayStr)).map((r) => r.author))];
     const weekAbsent = [...new Set(activeLeaves.filter((r) => overlaps(r, ymd(weekStart), ymd(weekEnd))).map((r) => r.author))];
 
+    // ── 업무 메모(staff_notes) — 후속조치일 도래/지남 (대표 본인 리마인드) ──
+    const { data: notes } = await sb.from("staff_notes")
+      .select("title, employee_name, follow_up_date, status")
+      .is("deleted_at", null)
+      .in("status", ["open", "in_progress"])
+      .not("follow_up_date", "is", null)
+      .lte("follow_up_date", todayStr);
+    const dueNotes = (notes || []).slice().sort((a, b) => (a.follow_up_date || "").localeCompare(b.follow_up_date || ""));
+    const notesDueToday = dueNotes.filter((n) => n.follow_up_date === todayStr).length;
+    const notesOverdue = dueNotes.filter((n) => n.follow_up_date < todayStr).length;
+    const noteItems = dueNotes.slice(0, 2).map((n) => ({
+      title: n.title || "(제목 없음)",
+      employee: n.employee_name || "",
+      dday: dday(n.follow_up_date, today),
+    }));
+
     const summary = {
       date: todayStr,
       center: { needCheck: centerNeed, overdue: centerOverdue, due7: centerDue7.length, dueItems: centerDueItems },
       inbox: { needReview: inboxNeed },
       journal: { submitted: submittedAuthors.size, expected: EXPECTED_AUTHORS.length, missing: missingAuthors },
       leave: { todayAbsent, weekAbsentCount: weekAbsent.length },
+      staffNotes: { dueToday: notesDueToday, overdue: notesOverdue, items: noteItems },
     };
     return new Response(JSON.stringify(summary), { headers: { "Content-Type": "application/json" } });
   } catch (e) {

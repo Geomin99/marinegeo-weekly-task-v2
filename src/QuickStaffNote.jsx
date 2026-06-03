@@ -2,30 +2,38 @@ import { useState } from "react";
 import { StickyNote, X } from "lucide-react";
 import { STAFF, MEMO_TYPES, PRIORITIES, STATUSES, VISIBILITIES, createStaffNote } from "./staffNotes";
 
-// 회의록·통화로그·센터 등에서 '업무 메모로 저장'. owner(관리자)만 노출.
-// props: session, viewer, related={module,id}, defaultTitle, defaultEmployee, defaultType, onNotice, iconOnly
-export function StaffNoteButton({ session, viewer, related, defaultTitle, defaultEmployee, defaultType, onNotice, iconOnly = true, label = "업무 메모" }) {
+// 회의록·통화로그·센터·받은편지함·주간업무 등에서 '메모로 전환'. owner(관리자)만 노출.
+// props: session, viewer, related={module,id}, defaultTitle, defaultContent, defaultEmployee, defaultType,
+//        defaultPriority, defaultFollowUp, onNotice, onSaved, iconOnly, label, hasNote
+export function StaffNoteButton({
+  session, viewer, related, defaultTitle, defaultContent, defaultEmployee, defaultType,
+  defaultPriority, defaultFollowUp, onNotice, onSaved, iconOnly = true, label = "업무 메모", hasNote = false,
+}) {
   const [open, setOpen] = useState(false);
   if (viewer?.role !== "owner") return null;
+  if (hasNote) {
+    return <span className="badge green" title="이미 이 항목으로 만든 메모가 있습니다"><StickyNote size={11} className="inline" /> 메모 생성됨</span>;
+  }
   return (
     <>
-      <button className={iconOnly ? "icon-btn" : "btn btn-ghost"} title="업무 메모로 저장" onClick={() => setOpen(true)}>
+      <button className={iconOnly ? "icon-btn" : "btn btn-ghost"} title="업무 메모로 전환" onClick={() => setOpen(true)}>
         <StickyNote size={iconOnly ? 15 : 13} />{!iconOnly && <span> {label}</span>}
       </button>
       {open && (
-        <QuickModal session={session} related={related} defaultTitle={defaultTitle}
+        <QuickModal session={session} related={related} defaultTitle={defaultTitle} defaultContent={defaultContent}
                     defaultEmployee={defaultEmployee} defaultType={defaultType}
-                    onClose={() => setOpen(false)} onNotice={onNotice} />
+                    defaultPriority={defaultPriority} defaultFollowUp={defaultFollowUp}
+                    onClose={() => setOpen(false)} onNotice={onNotice} onSaved={onSaved} />
       )}
     </>
   );
 }
 
-function QuickModal({ session, related, defaultTitle, defaultEmployee, defaultType, onClose, onNotice }) {
+function QuickModal({ session, related, defaultTitle, defaultContent, defaultEmployee, defaultType, defaultPriority, defaultFollowUp, onClose, onNotice, onSaved }) {
   const [f, setF] = useState({
     employee_id: defaultEmployee || "", memo_type: defaultType || "후속조치",
-    title: defaultTitle || "", content: "",
-    priority: "보통", status: "open", follow_up_date: "", visibility: "private",
+    title: defaultTitle || "", content: defaultContent || "",
+    priority: defaultPriority || "보통", status: "open", follow_up_date: defaultFollowUp || "", visibility: "private",
   });
   const [busy, setBusy] = useState(false);
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
@@ -38,8 +46,13 @@ function QuickModal({ session, related, defaultTitle, defaultEmployee, defaultTy
       const { error } = await createStaffNote(session, {
         ...f, related_module: related?.module || null, related_id: related?.id ?? null,
       });
-      if (error) throw error;
+      if (error) {
+        // 23505 = unique_violation: 같은 원본으로 같은 직원에게 이미 메모 있음
+        if (error.code === "23505") { onNotice?.("이미 이 항목으로 만든 메모가 있습니다.", "info"); onSaved?.(); onClose(); setBusy(false); return; }
+        throw error;
+      }
       onNotice?.("업무 메모로 저장했습니다.", "success");
+      onSaved?.();
       onClose();
     } catch (e) { onNotice?.(`저장 실패: ${e.message}`, "error"); }
     setBusy(false);

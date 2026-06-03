@@ -8,15 +8,18 @@ export const STAFF = [
   { email: "pyoring94@gmail.com", name: "최승표" },
 ];
 export const nameForEmail = (e) => STAFF.find((s) => s.email === (e || "").toLowerCase())?.name || e;
+export const emailForName = (n) => STAFF.find((s) => s.name === n)?.email || null;
 
-export const MEMO_TYPES = ["일반", "업무지시", "확인필요", "후속조치", "칭찬성과", "주의리스크", "개인일정", "회의", "통화", "센터"];
+// memo_type = '왜 적었는지'만 담당. 출처(회의/통화/센터)는 related_module로 분리 (2026-06-04 포테토뭉 정리).
+export const MEMO_TYPES = ["일반", "업무지시", "확인필요", "후속조치", "칭찬성과", "주의리스크", "개인일정"];
 
 export const TYPE_COLORS = {
   "일반": { bg: "#e5e7eb", fg: "#374151" }, "업무지시": { bg: "#dbeafe", fg: "#1e4f8f" },
   "확인필요": { bg: "#fff1c7", fg: "#6b4a00" }, "후속조치": { bg: "#e6e3f8", fg: "#4f4a91" },
   "칭찬성과": { bg: "#d9f0e3", fg: "#1f5c3b" }, "주의리스크": { bg: "#fde2e2", fg: "#8a2f2f" },
-  "개인일정": { bg: "#e0f2fe", fg: "#075985" }, "회의": { bg: "#ede9fe", fg: "#5b21b6" },
-  "통화": { bg: "#ffedd5", fg: "#9a3412" }, "센터": { bg: "#e6e3f8", fg: "#4f4a91" },
+  "개인일정": { bg: "#e0f2fe", fg: "#075985" },
+  // 레거시 호환(과거 메모가 가진 값) — 드롭다운엔 없지만 배지 색은 유지
+  "회의": { bg: "#ede9fe", fg: "#5b21b6" }, "통화": { bg: "#ffedd5", fg: "#9a3412" }, "센터": { bg: "#e6e3f8", fg: "#4f4a91" },
 };
 export const PRIORITIES = ["낮음", "보통", "높음", "긴급"];
 export const PRIORITY_COLORS = {
@@ -40,7 +43,10 @@ export const visLabel = (v) => VISIBILITIES.find((x) => x.v === v)?.label || v;
 export const MODULE_LABEL = {
   weekly_task: "주간업무", marine_center: "해양벤처진흥센터", vacation: "휴가·출장",
   call_log: "업무 통화 로그", meeting: "회의록", project: "프로젝트",
+  inbox: "받은편지함", journal: "주간업무",
 };
+// 받은편지함 draft priority(urgent/high/normal/low) → 메모 중요도
+export const PRIORITY_FROM_DRAFT = { urgent: "긴급", high: "높음", normal: "보통", low: "낮음" };
 
 // owner가 '직원 메모로 저장' 시 공통 INSERT (author_email은 RLS와 일치해야 함)
 export async function createStaffNote(session, payload) {

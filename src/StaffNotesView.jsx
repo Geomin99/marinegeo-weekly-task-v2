@@ -39,6 +39,7 @@ export default function StaffNotesView({ session, viewer, onNotice }) {
   const [fEmp, setFEmp] = useState("");
   const [fType, setFType] = useState("");
   const [fStatus, setFStatus] = useState("");
+  const [fModule, setFModule] = useState("");
   const [sort, setSort] = useState("recent");  // recent | followup | priority
 
   useEffect(() => { reload(); }, []);
@@ -102,6 +103,7 @@ export default function StaffNotesView({ session, viewer, onNotice }) {
       if (fEmp && n.employee_id !== fEmp) return false;
       if (fType && n.memo_type !== fType) return false;
       if (fStatus && n.status !== fStatus) return false;
+      if (fModule && (n.related_module || "") !== fModule) return false;
       if (needle) {
         const hay = [n.title, n.content, n.employee_name, n.memo_type].filter(Boolean).join(" ").toLowerCase();
         if (!hay.includes(needle)) return false;
@@ -111,7 +113,13 @@ export default function StaffNotesView({ session, viewer, onNotice }) {
     if (sort === "followup") arr = [...arr].sort((a, b) => (a.follow_up_date || "9999").localeCompare(b.follow_up_date || "9999"));
     else if (sort === "priority") { const w = { 긴급: 0, 높음: 1, 보통: 2, 낮음: 3 }; arr = [...arr].sort((a, b) => (w[a.priority] ?? 9) - (w[b.priority] ?? 9)); }
     return arr;
-  }, [list, q, fEmp, fType, fStatus, sort]);
+  }, [list, q, fEmp, fType, fStatus, fModule, sort]);
+
+  // 현재 목록에 실제로 존재하는 관련 모듈만 필터 옵션으로 노출
+  const moduleOptions = useMemo(() => {
+    const set = new Set(list.map((n) => n.related_module).filter(Boolean));
+    return [...set];
+  }, [list]);
 
   const kpi = useMemo(() => {
     let check = 0, overdue = 0, openN = 0, urgent = 0;
@@ -171,6 +179,11 @@ export default function StaffNotesView({ session, viewer, onNotice }) {
           <select value={fStatus} onChange={(e) => setFStatus(e.target.value)} className="vc-input" style={{ width: "auto" }}>
             <option value="">상태 전체</option>{STATUSES.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}
           </select>
+          {moduleOptions.length > 0 && (
+            <select value={fModule} onChange={(e) => setFModule(e.target.value)} className="vc-input" style={{ width: "auto" }}>
+              <option value="">출처 전체</option>{moduleOptions.map((m) => <option key={m} value={m}>{MODULE_LABEL[m] || m}</option>)}
+            </select>
+          )}
           <select value={sort} onChange={(e) => setSort(e.target.value)} className="vc-input" style={{ width: "auto" }}>
             <option value="recent">최신순</option><option value="followup">후속조치일순</option><option value="priority">중요도순</option>
           </select>

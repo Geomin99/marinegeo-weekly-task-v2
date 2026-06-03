@@ -34,6 +34,8 @@ import InboxView from "./InboxView.jsx";
 import VoiceLogView from "./VoiceLogView.jsx";
 import MeetingView from "./MeetingView.jsx";
 import StaffNotesView from "./StaffNotesView.jsx";
+import { StaffNoteButton } from "./QuickStaffNote.jsx";
+import { emailForName } from "./staffNotes";
 import { ErpHero } from "./ErpHero.jsx";
 
 const BRAND = {
@@ -676,7 +678,7 @@ function leaveOverlaps(r, a, b) {
   return s && e && s <= b && e >= a;
 }
 
-function Dashboard({ entries, journalStats, centerTasks, leaveRequests, setView, onTrigger, triggering, inboxDrafts = [], isOwner = false, staffNotes = [] }) {
+function Dashboard({ entries, journalStats, centerTasks, leaveRequests, setView, onTrigger, triggering, inboxDrafts = [], isOwner = false, staffNotes = [], session = null, viewer = null, relatedKeys = new Set(), onNotesChanged, onNotice }) {
   const today = useMemo(() => startOfToday(), []);
   const weekStart = useMemo(() => {
     const d = new Date(today);
@@ -791,6 +793,8 @@ function Dashboard({ entries, journalStats, centerTasks, leaveRequests, setView,
         weekLabel: latest?.weekLabel || "",
         groups: groups.slice(0, 6),
         notes: (latest?.notes || "").trim(),
+        entryId: latest?.id ?? null,
+        authorEmail: emailForName(name),
       };
     });
   }, [entries, journalStats.authorStats]);
@@ -1050,7 +1054,21 @@ function Dashboard({ entries, journalStats, centerTasks, leaveRequests, setView,
                 ) : (
                   <div className="dash-empty compact">신규 업데이트 없음</div>
                 )}
-                <p className="sub-label">확인 사항</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="sub-label" style={{ margin: 0 }}>확인 사항</p>
+                  {isOwner && p.notes && p.entryId && (
+                    <StaffNoteButton
+                      session={session} viewer={viewer}
+                      related={{ module: "journal", id: p.entryId }}
+                      defaultTitle={`${p.name} 주간 확인사항 후속`}
+                      defaultContent={p.notes}
+                      defaultType="후속조치"
+                      defaultEmployee={p.authorEmail || ""}
+                      onNotice={onNotice} onSaved={onNotesChanged}
+                      hasNote={relatedKeys.has(`journal:${p.entryId}`)}
+                      iconOnly={false} label="후속 메모" />
+                  )}
+                </div>
                 {p.notes ? (
                   <p className="jcard-notes">{p.notes}</p>
                 ) : (
@@ -1381,6 +1399,15 @@ function Workspace({ session }) {
     return staffNotes.filter((n) => !n.acknowledged_at && (n.visibility === "employee" || n.visibility === "team")).length;
   }, [staffNotes, isOwner]);
 
+  // 출처 연결 메모 존재 여부 집계 (받은편지함·주간업무 '메모 생성됨' 배지 + 중복 전환 차단)
+  const relatedKeys = useMemo(() => {
+    const s = new Set();
+    for (const n of staffNotes) {
+      if (n.related_module && n.related_id != null) s.add(`${n.related_module}:${n.related_id}`);
+    }
+    return s;
+  }, [staffNotes]);
+
   // 대시보드 트리거: 누를 때마다 캘린더 동기화 + 전체 데이터 새로고침 (on-demand)
   const [triggering, setTriggering] = useState(false);
   const runTrigger = useCallback(async () => {
@@ -1574,6 +1601,11 @@ function Workspace({ session }) {
               inboxDrafts={inboxDrafts}
               isOwner={isOwner}
               staffNotes={staffNotes}
+              session={session}
+              viewer={viewerForSession(session)}
+              relatedKeys={relatedKeys}
+              onNotesChanged={fetchStaffNotes}
+              onNotice={showNotice}
             />
           )}
           {view === "journal" && (
@@ -1612,7 +1644,8 @@ function Workspace({ session }) {
             </section>
           )}
           {view === "inbox" && isOwner && (
-            <InboxView drafts={inboxDrafts} onReload={fetchInbox} onNotice={showNotice} ownerId={session?.user?.id} />
+            <InboxView drafts={inboxDrafts} onReload={fetchInbox} onNotice={showNotice} ownerId={session?.user?.id}
+              session={session} viewer={viewerForSession(session)} relatedKeys={relatedKeys} onNotesChanged={fetchStaffNotes} />
           )}
           {view === "voice" && isOwner && (
             <VoiceLogView logs={voiceLogs} loading={false} onReload={fetchVoice} onNotice={showNotice} ownerId={session?.user?.id} session={session} viewer={viewerForSession(session)} />

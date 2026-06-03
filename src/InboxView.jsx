@@ -2,6 +2,10 @@ import { useState, useRef } from "react";
 import { ExternalLink, CheckCircle2, Archive, RotateCcw, Inbox, Clock, Mail } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { ErpHero } from "./ErpHero.jsx";
+import { StaffNoteButton } from "./QuickStaffNote.jsx";
+import { PRIORITY_FROM_DRAFT } from "./staffNotes";
+
+const OWNER_EMAIL = "geomin99@gmail.com"; // 받은편지함은 대표 개인 triage — 기본 대상=대표 본인
 
 // 받은편지함 업무 추출 초안 (A안) — 토뭉이님 전용. inbox_action_drafts(RLS owner) 조회.
 const CAT_LABEL = {
@@ -22,7 +26,7 @@ const PRIO_ORDER = { urgent: 0, high: 1, normal: 2, low: 3 };
 
 function fmt(s) { return s ? String(s).slice(0, 10) : ""; }
 
-function DraftCard({ d, busy, onStatus }) {
+function DraftCard({ d, busy, onStatus, session, viewer, hasNote, onNotesChanged, onNotice }) {
   const p = PRIO[d.priority] || PRIO.normal;
   const done = d.status === "done" || d.status === "archived";
   const strip = d.status === "done" ? "green" : d.status === "archived" ? "muted"
@@ -47,6 +51,19 @@ function DraftCard({ d, busy, onStatus }) {
         {d.summary_masked && <p className="center-task-note">{d.summary_masked}</p>}
       </div>
       <div className="center-task-actions">
+        {d.status === "needs_review" && (
+          <StaffNoteButton
+            session={session} viewer={viewer}
+            related={{ module: "inbox", id: d.id }}
+            defaultTitle={d.subject_masked || ""}
+            defaultContent={d.summary_masked || ""}
+            defaultType="확인필요"
+            defaultEmployee={OWNER_EMAIL}
+            defaultPriority={PRIORITY_FROM_DRAFT[d.priority] || "보통"}
+            defaultFollowUp={d.due_date ? String(d.due_date).slice(0, 10) : ""}
+            onNotice={onNotice} onSaved={onNotesChanged} hasNote={hasNote}
+          />
+        )}
         {done ? (
           <button className="icon-btn" title="확인필요로 되돌리기" onClick={() => onStatus(d.id, "needs_review")} disabled={busy}><RotateCcw size={15} /></button>
         ) : (
@@ -63,7 +80,8 @@ function DraftCard({ d, busy, onStatus }) {
   );
 }
 
-export default function InboxView({ drafts, onReload, onNotice, ownerId }) {
+export default function InboxView({ drafts, onReload, onNotice, ownerId, session, viewer, relatedKeys, onNotesChanged }) {
+  const hasNoteFor = (id) => relatedKeys?.has(`inbox:${id}`) || false;
   const [busyId, setBusyId] = useState(null);
   const [scan, setScan] = useState(null);
   const pollRef = useRef(null);
@@ -137,7 +155,8 @@ export default function InboxView({ drafts, onReload, onNotice, ownerId }) {
           </div>
         ) : (
           <div className="grid gap-2.5">
-            {open.map((d) => <DraftCard key={d.id} d={d} busy={busyId === d.id} onStatus={onStatus} />)}
+            {open.map((d) => <DraftCard key={d.id} d={d} busy={busyId === d.id} onStatus={onStatus}
+              session={session} viewer={viewer} hasNote={hasNoteFor(d.id)} onNotesChanged={onNotesChanged} onNotice={onNotice} />)}
           </div>
         )}
 
@@ -145,7 +164,8 @@ export default function InboxView({ drafts, onReload, onNotice, ownerId }) {
           <>
             <div className="text-[13px] font-bold mt-6 mb-2" style={{ color: "#637083" }}>처리됨 ({handled.length})</div>
             <div className="grid gap-2.5 opacity-80">
-              {handled.map((d) => <DraftCard key={d.id} d={d} busy={busyId === d.id} onStatus={onStatus} />)}
+              {handled.map((d) => <DraftCard key={d.id} d={d} busy={busyId === d.id} onStatus={onStatus}
+                session={session} viewer={viewer} hasNote={hasNoteFor(d.id)} onNotesChanged={onNotesChanged} onNotice={onNotice} />)}
             </div>
           </>
         )}
