@@ -2,14 +2,14 @@ import { useState } from "react";
 import { StickyNote, X } from "lucide-react";
 import { STAFF, MEMO_TYPES, PRIORITIES, STATUSES, VISIBILITIES, createStaffNote } from "./staffNotes";
 
-// 회의록·통화로그·센터 등에서 '직원 메모로 저장'. owner(관리자)만 노출.
+// 회의록·통화로그·센터 등에서 '업무 메모로 저장'. owner(관리자)만 노출.
 // props: session, viewer, related={module,id}, defaultTitle, defaultEmployee, defaultType, onNotice, iconOnly
-export function StaffNoteButton({ session, viewer, related, defaultTitle, defaultEmployee, defaultType, onNotice, iconOnly = true, label = "직원 메모" }) {
+export function StaffNoteButton({ session, viewer, related, defaultTitle, defaultEmployee, defaultType, onNotice, iconOnly = true, label = "업무 메모" }) {
   const [open, setOpen] = useState(false);
   if (viewer?.role !== "owner") return null;
   return (
     <>
-      <button className={iconOnly ? "icon-btn" : "btn btn-ghost"} title="직원 메모로 저장" onClick={() => setOpen(true)}>
+      <button className={iconOnly ? "icon-btn" : "btn btn-ghost"} title="업무 메모로 저장" onClick={() => setOpen(true)}>
         <StickyNote size={iconOnly ? 15 : 13} />{!iconOnly && <span> {label}</span>}
       </button>
       {open && (
@@ -39,7 +39,7 @@ function QuickModal({ session, related, defaultTitle, defaultEmployee, defaultTy
         ...f, related_module: related?.module || null, related_id: related?.id ?? null,
       });
       if (error) throw error;
-      onNotice?.("직원 메모로 저장했습니다.", "success");
+      onNotice?.("업무 메모로 저장했습니다.", "success");
       onClose();
     } catch (e) { onNotice?.(`저장 실패: ${e.message}`, "error"); }
     setBusy(false);
@@ -49,7 +49,7 @@ function QuickModal({ session, related, defaultTitle, defaultEmployee, defaultTy
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.5)" }} onClick={onClose}>
       <div className="bg-white rounded-xl shadow-xl w-full overflow-hidden" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 flex items-center justify-between" style={{ background: "var(--mg-navy)", color: "#fff" }}>
-          <div className="flex items-center gap-2"><StickyNote size={18} /><h3 className="font-bold">직원 메모로 저장</h3></div>
+          <div className="flex items-center gap-2"><StickyNote size={18} /><h3 className="font-bold">업무 메모로 저장</h3></div>
           <button onClick={onClose} className="hover:opacity-70"><X size={18} /></button>
         </div>
         <div className="p-5 space-y-3 text-[13px]">

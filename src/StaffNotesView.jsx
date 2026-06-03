@@ -84,6 +84,17 @@ export default function StaffNotesView({ session, viewer, onNotice }) {
     setBusy(false);
   }
 
+  // 직원: 나에게 공유된 메모 '확인' 처리
+  async function acknowledge(row) {
+    setBusy(true);
+    try {
+      const { error } = await supabase.rpc("staff_note_acknowledge", { p_id: row.id });
+      if (error) throw error;
+      onNotice?.("확인했습니다.", "success"); reload();
+    } catch (e) { onNotice?.(`확인 실패: ${e.message}`, "error"); }
+    setBusy(false);
+  }
+
   const tStr = todayStr();
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -118,9 +129,9 @@ export default function StaffNotesView({ session, viewer, onNotice }) {
     <NoteErrorBoundary>
     <section className="module-frame">
       <ErpHero
-        title="직원 메모"
-        meta={isOwner ? `관리 메모 · 전체 ${list.length}건` : `내 공유 메모 · ${list.length}건`}
-        tags={isOwner ? ["내부 관리", "업무 연결", "권한별 열람(RLS)"] : ["내게 공유된 메모", "읽기 전용"]}
+        title={isOwner ? "업무 메모" : "공유된 업무 기록"}
+        meta={isOwner ? `내부 관리 메모 · 전체 ${list.length}건` : `나에게 공유된 업무 기록 · ${list.length}건`}
+        tags={isOwner ? ["내부 관리", "업무 연결", "권한별 열람(RLS)"] : ["내게 공유된 기록", "읽기 전용"]}
         actions={<button onClick={reload}><RotateCcw size={14} /> 새로고침</button>}
       />
       <div className="px-1 py-4">
@@ -192,14 +203,19 @@ export default function StaffNotesView({ session, viewer, onNotice }) {
                           <span>작성: {nameForEmail(n.author_email)} · {String(n.created_at).slice(0, 10)}</span>
                           {n.follow_up_date && <span style={{ color: overdue ? "#dc2626" : "#94a3b8", fontWeight: overdue ? 700 : 400 }}><CalendarClock size={11} className="inline" /> 후속 {n.follow_up_date}{overdue ? " (지남)" : ""}</span>}
                           {isOwner && <span>· {visLabel(n.visibility)}</span>}
+                          {(n.visibility === "employee" || n.visibility === "team") && (
+                            <span style={{ color: n.acknowledged_at ? "#16a34a" : "#dc2626", fontWeight: 600 }}>· {n.acknowledged_at ? `확인됨 ${String(n.acknowledged_at).slice(0, 10)}` : "미확인"}</span>
+                          )}
                         </div>
                       </div>
-                      {isOwner && (
+                      {isOwner ? (
                         <div className="flex items-center gap-1 shrink-0">
                           <button className="icon-btn" title="수정" onClick={() => setModal(n)}><Pencil size={15} /></button>
                           <button className="icon-btn danger" title="삭제" onClick={() => setConfirmDel(n)} disabled={busy}><Trash2 size={15} /></button>
                         </div>
-                      )}
+                      ) : !n.acknowledged_at ? (
+                        <button className="btn btn-primary shrink-0" style={{ padding: "5px 12px", fontSize: 12.5 }} onClick={() => acknowledge(n)} disabled={busy}>확인</button>
+                      ) : null}
                     </div>
                   </div>
                 );

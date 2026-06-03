@@ -528,7 +528,7 @@ function JournalView({ loading, searchQuery, setSearchQuery, authorFilter, setAu
   );
 }
 
-function Sidebar({ view, setView, stats, centerStats, currentUser, onLogout, isOwner, inboxCount, voiceCount }) {
+function Sidebar({ view, setView, stats, centerStats, currentUser, onLogout, isOwner, inboxCount, voiceCount, staffCount = 0 }) {
   return (
     <aside className="app-sidebar">
       <button className="brand-lockup" onClick={() => setView("dashboard")} title="대시보드로 이동">
@@ -589,7 +589,8 @@ function Sidebar({ view, setView, stats, centerStats, currentUser, onLogout, isO
         </button>
         <button className={view === "staffnotes" ? "active" : ""} onClick={() => setView("staffnotes")}>
           <StickyNote size={17} />
-          <span>직원 메모</span>
+          <span>업무 메모</span>
+          {staffCount > 0 && <span className="side-nav-count">{staffCount}</span>}
         </button>
       </nav>
 
@@ -890,37 +891,42 @@ function Dashboard({ entries, journalStats, centerTasks, leaveRequests, setView,
         )}
       </section>
 
-      {/* ── 직원 메모 · 확인 필요 (owner 전용) ── */}
-      {isOwner && (() => {
+      {/* ── 업무 메모 위젯 (대표=확인 필요 / 직원=나에게 온 미확인) ── */}
+      {(() => {
         const tY = new Date();
         const todayY = `${tY.getFullYear()}-${String(tY.getMonth() + 1).padStart(2, "0")}-${String(tY.getDate()).padStart(2, "0")}`;
-        const alerts = (staffNotes || [])
-          .filter((n) => n.status !== "done" && n.status !== "archived")
-          .map((n) => ({
-            ...n,
-            overdue: !!(n.follow_up_date && n.follow_up_date < todayY),
-            dueToday: n.follow_up_date === todayY,
-            urgent: n.priority === "긴급",
-          }))
-          .filter((n) => n.overdue || n.dueToday || n.urgent)
-          .sort((a, b) => (a.follow_up_date || "9999").localeCompare(b.follow_up_date || "9999"))
-          .slice(0, 8);
+        let title, empty, alerts;
+        if (isOwner) {
+          title = "업무 메모 · 확인 필요"; empty = "확인할 업무 메모가 없습니다.";
+          alerts = (staffNotes || [])
+            .filter((n) => n.status !== "done" && n.status !== "archived")
+            .map((n) => ({ ...n, overdue: !!(n.follow_up_date && n.follow_up_date < todayY), dueToday: n.follow_up_date === todayY, urgent: n.priority === "긴급" }))
+            .filter((n) => n.overdue || n.dueToday || n.urgent)
+            .sort((a, b) => (a.follow_up_date || "9999").localeCompare(b.follow_up_date || "9999")).slice(0, 8);
+        } else {
+          title = "공유된 업무 기록"; empty = null;
+          alerts = (staffNotes || [])
+            .filter((n) => (n.visibility === "employee" || n.visibility === "team"))
+            .map((n) => ({ ...n, unread: !n.acknowledged_at }))
+            .sort((a, b) => (b.unread ? 1 : 0) - (a.unread ? 1 : 0)).slice(0, 8);
+          if (alerts.length === 0) return null;  // 직원에게 공유 메모 없으면 위젯 숨김
+        }
         return (
           <section className="panel compact">
             <div className="panel-title-row">
-              <h3><span className="panel-ic ic-blue"><StickyNote size={15} /></span> 직원 메모 · 확인 필요</h3>
+              <h3><span className="panel-ic ic-blue"><StickyNote size={15} /></span> {title}</h3>
               <button className="ghost-btn" onClick={() => setView("staffnotes")}>전체 보기</button>
             </div>
             {alerts.length === 0 ? (
-              <div className="dash-empty">확인할 직원 메모가 없습니다.</div>
+              <div className="dash-empty">{empty}</div>
             ) : (
               <ul className="brief-list">
                 {alerts.map((n, i) => (
                   <li key={i} onClick={() => setView("staffnotes")}>
-                    <span className={"brief-dot " + (n.overdue ? "d-red" : n.urgent ? "d-amber" : "d-blue")} />
-                    <span className="brief-sub">{n.employee_name}</span>
+                    <span className={"brief-dot " + (isOwner ? (n.overdue ? "d-red" : n.urgent ? "d-amber" : "d-blue") : (n.unread ? "d-amber" : "d-blue"))} />
+                    <span className="brief-sub">{isOwner ? n.employee_name : (n.memo_type || "메모")}</span>
                     <span className="brief-label">{n.title || n.content}</span>
-                    <span className="brief-dday">{n.overdue ? "지남" : n.dueToday ? "오늘" : n.urgent ? "긴급" : ""}</span>
+                    <span className="brief-dday">{isOwner ? (n.overdue ? "지남" : n.dueToday ? "오늘" : n.urgent ? "긴급" : "") : (n.unread ? "미확인" : "확인")}</span>
                   </li>
                 ))}
               </ul>
@@ -1351,19 +1357,28 @@ function Workspace({ session }) {
     fetchVoice();
   }, [fetchVoice]);
 
-  // 직원 메모 (owner 전용 — 대시보드 위젯). RLS가 owner 전체 반환.
+  // 업무 메모. RLS: owner=전체, 직원=본인 공개분만. (대시보드 위젯·사이드바 배지 공용)
   const [staffNotes, setStaffNotes] = useState([]);
   const fetchStaffNotes = useCallback(async () => {
-    if (!isOwner) { setStaffNotes([]); return; }
     const { data, error } = await supabase
       .from("staff_notes").select("*").is("deleted_at", null)
       .order("follow_up_date", { ascending: true, nullsFirst: false });
     setStaffNotes(error ? [] : data || []);
-  }, [isOwner]);
+  }, []);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchStaffNotes();
   }, [fetchStaffNotes]);
+
+  // 사이드바 배지: 대표=오늘·지난 후속조치 / 직원=미확인 공유 메모
+  const staffCount = useMemo(() => {
+    const tY = new Date();
+    const todayY = `${tY.getFullYear()}-${String(tY.getMonth() + 1).padStart(2, "0")}-${String(tY.getDate()).padStart(2, "0")}`;
+    if (isOwner) {
+      return staffNotes.filter((n) => n.status !== "done" && n.status !== "archived" && n.follow_up_date && n.follow_up_date <= todayY).length;
+    }
+    return staffNotes.filter((n) => !n.acknowledged_at && (n.visibility === "employee" || n.visibility === "team")).length;
+  }, [staffNotes, isOwner]);
 
   // 대시보드 트리거: 누를 때마다 캘린더 동기화 + 전체 데이터 새로고침 (on-demand)
   const [triggering, setTriggering] = useState(false);
@@ -1542,7 +1557,7 @@ function Workspace({ session }) {
     <div className="app-shell" style={{ "--brand-navy": BRAND.navy, "--brand-blue": BRAND.blue, "--brand-accent": BRAND.accent }}>
       <Sidebar view={view} setView={setView} stats={stats} centerStats={centerStats} currentUser={currentUser} onLogout={handleLogout}
                isOwner={isOwner} inboxCount={inboxDrafts.filter((d) => d.status === "needs_review").length}
-               voiceCount={voiceLogs.filter((v) => v.follow_up_required).length} />
+               voiceCount={voiceLogs.filter((v) => v.follow_up_required).length} staffCount={staffCount} />
       <div className="app-main">
         <Topbar view={view} stats={stats} />
         <main className="content-area">
