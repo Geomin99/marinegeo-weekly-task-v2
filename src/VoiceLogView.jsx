@@ -3,6 +3,7 @@ import { Mic, Upload, FileAudio, Trash2, RotateCcw, ChevronDown, ChevronUp, Shie
 import { supabase } from "./supabaseClient";
 import { ErpHero } from "./ErpHero.jsx";
 import { gcalReady, createAllDayEvent } from "./gcal";
+import { StaffNoteButton } from "./QuickStaffNote.jsx";
 
 // 업무 통화 로그 (geomin99 전용). 업로드 → 비공개 Storage(voice-calls) → voice_call_logs(pending).
 // 전사(로컬 whisper 워커)·요약(토심이)은 후속 단계에서 status를 채운다.
@@ -35,7 +36,7 @@ function parseFilename(name) {
   return out;
 }
 
-export default function VoiceLogView({ logs, loading, onReload, onNotice, ownerId }) {
+export default function VoiceLogView({ logs, loading, onReload, onNotice, ownerId, session, viewer }) {
   const fileRef = useRef(null);
   const [file, setFile] = useState(null);
   const [form, setForm] = useState({ title: "", organization_name: "", contact_person: "", phone_number: "", call_date: "" });
@@ -196,6 +197,8 @@ export default function VoiceLogView({ logs, loading, onReload, onNotice, ownerI
                       <button className="icon-btn" title="상세" onClick={() => setOpenId(open ? null : r.id)}>
                         {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
                       </button>
+                      <StaffNoteButton session={session} viewer={viewer} onNotice={onNotice}
+                                       related={{ module: "call_log", id: r.id }} defaultTitle={r.title} defaultType="통화" />
                       <button className="icon-btn danger" title="삭제" onClick={() => setConfirmRow(r)} disabled={busy}><Trash2 size={15} /></button>
                     </div>
                   </div>

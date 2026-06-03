@@ -22,6 +22,7 @@ import {
 import { supabase } from "./supabaseClient";
 import { gcalReady, createAllDayEvent, CENTER_EVENT_COLOR_ID } from "./gcal";
 import { ErpHero } from "./ErpHero.jsx";
+import { StaffNoteButton } from "./QuickStaffNote.jsx";
 
 // ── 표준 분류·상태·우선순위 (포테토뭉 합의 6/5/3종) ──
 const CATEGORIES = ["공공요금", "제출업무", "지원사업", "교육·시설", "입주·계약"];
@@ -108,7 +109,7 @@ function daysUntil(dateStr) {
   return Math.round((due - today) / 86400000);
 }
 
-export default function CenterView({ tasks = [], loading = false, onReload, onNotice }) {
+export default function CenterView({ tasks = [], loading = false, onReload, onNotice, session, viewer }) {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("전체");
   const [statusFilter, setStatusFilter] = useState("전체");
@@ -343,6 +344,8 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
               <Mail size={15} />
             </a>
           )}
+          <StaffNoteButton session={session} viewer={viewer} onNotice={onNotice}
+                           related={{ module: "marine_center", id: t.id }} defaultTitle={t.title} defaultType="센터" />
           <button className="icon-btn" title="수정" onClick={() => openEdit(t)}><Save size={15} /></button>
           <button className="icon-btn danger" title="삭제(보관)" onClick={() => setConfirmTask(t)}><Trash2 size={15} /></button>
         </div>

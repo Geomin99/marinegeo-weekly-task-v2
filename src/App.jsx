@@ -25,7 +25,7 @@ import {
   Search,
   Trash2,
   Users,
-  X,
+  X, StickyNote,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import LeaveView from "./LeaveView.jsx";
@@ -33,6 +33,7 @@ import CenterView from "./CenterView.jsx";
 import InboxView from "./InboxView.jsx";
 import VoiceLogView from "./VoiceLogView.jsx";
 import MeetingView from "./MeetingView.jsx";
+import StaffNotesView from "./StaffNotesView.jsx";
 import { ErpHero } from "./ErpHero.jsx";
 
 const BRAND = {
@@ -586,6 +587,10 @@ function Sidebar({ view, setView, stats, centerStats, currentUser, onLogout, isO
           <Users size={17} />
           <span>회의록</span>
         </button>
+        <button className={view === "staffnotes" ? "active" : ""} onClick={() => setView("staffnotes")}>
+          <StickyNote size={17} />
+          <span>직원 메모</span>
+        </button>
       </nav>
 
       <section className="panel compact side-summary">
@@ -669,7 +674,7 @@ function leaveOverlaps(r, a, b) {
   return s && e && s <= b && e >= a;
 }
 
-function Dashboard({ entries, journalStats, centerTasks, leaveRequests, setView, onTrigger, triggering, inboxDrafts = [], isOwner = false }) {
+function Dashboard({ entries, journalStats, centerTasks, leaveRequests, setView, onTrigger, triggering, inboxDrafts = [], isOwner = false, staffNotes = [] }) {
   const today = useMemo(() => startOfToday(), []);
   const weekStart = useMemo(() => {
     const d = new Date(today);
@@ -884,6 +889,45 @@ function Dashboard({ entries, journalStats, centerTasks, leaveRequests, setView,
           </ul>
         )}
       </section>
+
+      {/* ── 직원 메모 · 확인 필요 (owner 전용) ── */}
+      {isOwner && (() => {
+        const tY = new Date();
+        const todayY = `${tY.getFullYear()}-${String(tY.getMonth() + 1).padStart(2, "0")}-${String(tY.getDate()).padStart(2, "0")}`;
+        const alerts = (staffNotes || [])
+          .filter((n) => n.status !== "done" && n.status !== "archived")
+          .map((n) => ({
+            ...n,
+            overdue: !!(n.follow_up_date && n.follow_up_date < todayY),
+            dueToday: n.follow_up_date === todayY,
+            urgent: n.priority === "긴급",
+          }))
+          .filter((n) => n.overdue || n.dueToday || n.urgent)
+          .sort((a, b) => (a.follow_up_date || "9999").localeCompare(b.follow_up_date || "9999"))
+          .slice(0, 8);
+        return (
+          <section className="panel compact">
+            <div className="panel-title-row">
+              <h3><span className="panel-ic ic-blue"><StickyNote size={15} /></span> 직원 메모 · 확인 필요</h3>
+              <button className="ghost-btn" onClick={() => setView("staffnotes")}>전체 보기</button>
+            </div>
+            {alerts.length === 0 ? (
+              <div className="dash-empty">확인할 직원 메모가 없습니다.</div>
+            ) : (
+              <ul className="brief-list">
+                {alerts.map((n, i) => (
+                  <li key={i} onClick={() => setView("staffnotes")}>
+                    <span className={"brief-dot " + (n.overdue ? "d-red" : n.urgent ? "d-amber" : "d-blue")} />
+                    <span className="brief-sub">{n.employee_name}</span>
+                    <span className="brief-label">{n.title || n.content}</span>
+                    <span className="brief-dday">{n.overdue ? "지남" : n.dueToday ? "오늘" : n.urgent ? "긴급" : ""}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        );
+      })()}
 
       {/* ── KPI 스트립 ── */}
       <div className="dash-kpis">
@@ -1151,7 +1195,7 @@ function LoginScreen() {
   );
 }
 
-const VALID_VIEWS = [...NAV_ITEMS.map((n) => n.id), "inbox", "voice", "meeting"];
+const VALID_VIEWS = [...NAV_ITEMS.map((n) => n.id), "inbox", "voice", "meeting", "staffnotes"];
 function viewFromHash() {
   const h = (window.location.hash || "").replace(/^#\/?/, "");
   return VALID_VIEWS.includes(h) ? h : "dashboard";
@@ -1306,6 +1350,20 @@ function Workspace({ session }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchVoice();
   }, [fetchVoice]);
+
+  // 직원 메모 (owner 전용 — 대시보드 위젯). RLS가 owner 전체 반환.
+  const [staffNotes, setStaffNotes] = useState([]);
+  const fetchStaffNotes = useCallback(async () => {
+    if (!isOwner) { setStaffNotes([]); return; }
+    const { data, error } = await supabase
+      .from("staff_notes").select("*").is("deleted_at", null)
+      .order("follow_up_date", { ascending: true, nullsFirst: false });
+    setStaffNotes(error ? [] : data || []);
+  }, [isOwner]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchStaffNotes();
+  }, [fetchStaffNotes]);
 
   // 대시보드 트리거: 누를 때마다 캘린더 동기화 + 전체 데이터 새로고침 (on-demand)
   const [triggering, setTriggering] = useState(false);
@@ -1499,6 +1557,7 @@ function Workspace({ session }) {
               triggering={triggering}
               inboxDrafts={inboxDrafts}
               isOwner={isOwner}
+              staffNotes={staffNotes}
             />
           )}
           {view === "journal" && (
@@ -1531,6 +1590,8 @@ function Workspace({ session }) {
                 loading={centerLoading}
                 onReload={fetchCenter}
                 onNotice={showNotice}
+                session={session}
+                viewer={viewerForSession(session)}
               />
             </section>
           )}
@@ -1538,10 +1599,13 @@ function Workspace({ session }) {
             <InboxView drafts={inboxDrafts} onReload={fetchInbox} onNotice={showNotice} ownerId={session?.user?.id} />
           )}
           {view === "voice" && isOwner && (
-            <VoiceLogView logs={voiceLogs} loading={false} onReload={fetchVoice} onNotice={showNotice} ownerId={session?.user?.id} />
+            <VoiceLogView logs={voiceLogs} loading={false} onReload={fetchVoice} onNotice={showNotice} ownerId={session?.user?.id} session={session} viewer={viewerForSession(session)} />
           )}
           {view === "meeting" && (
             <MeetingView session={session} viewer={viewerForSession(session)} onNotice={showNotice} />
+          )}
+          {view === "staffnotes" && (
+            <StaffNotesView session={session} viewer={viewerForSession(session)} onNotice={showNotice} />
           )}
         </main>
       </div>

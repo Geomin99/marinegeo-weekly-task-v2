@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { ErpHero } from "./ErpHero.jsx";
+import { StaffNoteButton } from "./QuickStaffNote.jsx";
 
 // 흰화면 크래시 방지 (헌법 코드검증 의무 — 캘린더 흰화면 계기)
 class MeetErrorBoundary extends Component {
@@ -305,6 +306,8 @@ export default function MeetingView({ session, viewer, onNotice }) {
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         <button className="icon-btn" title="상세" onClick={() => openDetail(m)}>{open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</button>
+                        <StaffNoteButton session={session} viewer={viewer} onNotice={onNotice}
+                                         related={{ module: "meeting", id: m.id }} defaultTitle={m.title} defaultType="회의" />
                         <button className="icon-btn" title="수정" onClick={() => setModal(m)}><Pencil size={15} /></button>
                         <button className="icon-btn danger" title="삭제" onClick={() => setConfirmDel(m)} disabled={busy}><Trash2 size={15} /></button>
                       </div>
