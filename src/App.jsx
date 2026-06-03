@@ -622,9 +622,10 @@ function Sidebar({ view, setView, stats, centerStats, currentUser, onLogout, isO
   );
 }
 
+const VIEW_TITLES = { inbox: "받은편지함", voice: "업무 통화 로그", meeting: "회의록", staffnotes: "업무 메모" };
 function Topbar({ view, stats }) {
   const current = NAV_ITEMS.find((item) => item.id === view);
-  const title = current?.label || "주간업무";
+  const title = current?.label || VIEW_TITLES[view] || "대시보드";
   return (
     <header className="app-topbar">
       <div>
