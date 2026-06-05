@@ -143,10 +143,14 @@ export async function syncLeaveRequests(requests) {
   let pushed = 0, updated = 0, removed = 0, errors = 0;
   const calUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`;
   const authHeaders = { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json" };
-  const markSynced = (id, sig, extra = {}) =>
-    supabase.from("leave_requests")
+  const markSynced = async (id, sig, extra = {}) => {
+    // 구글은 성공했는데 서명 기록이 실패하면 다음 동기화에서 같은 건을 또 처리(루프/중복) 위험 → 최소한 경고로 노출
+    const { error } = await supabase.from("leave_requests")
       .update({ calendar_synced_at: new Date().toISOString(), calendar_sync_signature: sig, calendar_sync_error: null, ...extra })
       .eq("id", id);
+    if (error) console.warn("[gcal] markSynced 실패(다음 동기화에서 재시도):", id, error.message);
+    return error;
+  };
 
   for (const req of requests) {
     const sig = calendarSignature(req);

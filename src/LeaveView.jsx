@@ -1370,7 +1370,7 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
     existing ? existing.is_all_day !== false : (ext ? ext.is_all_day !== false : true)
   );
   const [startTime, setStartTime] = useState(hhmm(existing?.start_time) || ext?.start_time || "09:30");
-  const [endTime, setEndTime] = useState(hhmm(existing?.end_time) || (ext?.is_all_day === false ? "10:30" : "10:30"));
+  const [endTime, setEndTime] = useState(hhmm(existing?.end_time) || ext?.end_time || "10:30");
   const [destination, setDestination] = useState(existing?.destination || "");
   const [companions, setCompanions] = useState(existing?.companions || "");
   const [tripPurpose, setTripPurpose] = useState(existing?.trip_purpose || "");

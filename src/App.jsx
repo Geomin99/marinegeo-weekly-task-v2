@@ -538,6 +538,7 @@ function JournalView({ loading, searchQuery, setSearchQuery, authorFilter, setAu
 }
 
 function Sidebar({ view, setView, stats, centerStats, currentUser, onLogout, isOwner, inboxCount, voiceCount, staffCount = 0 }) {
+  const ava = avatarFor(currentUser);
   return (
     <aside className="app-sidebar">
       <button className="brand-lockup" onClick={() => setView("dashboard")} title="대시보드로 이동">
@@ -552,7 +553,7 @@ function Sidebar({ view, setView, stats, centerStats, currentUser, onLogout, isO
         <div className="side-user-info">
           <span
             className="side-user-avatar"
-            style={{ backgroundColor: avatarFor(currentUser).bg, color: avatarFor(currentUser).text }}
+            style={{ backgroundColor: ava.bg, color: ava.text }}
           >
             <span className="ava-ch">{(currentUser || "?").slice(0, 1)}</span>
           </span>
@@ -1336,6 +1337,8 @@ function Workspace({ session }) {
 
   // 받은편지함 업무 초안 (A안) — 토뭉이님(geomin99) 전용. RLS로 owner 행만 조회됨.
   const isOwner = (session?.user?.email || "").toLowerCase() === "geomin99@gmail.com";
+  // viewer 객체를 매 렌더 새로 만들지 않도록 메모이즈 (자식 뷰 불필요 재렌더 방지)
+  const viewer = useMemo(() => viewerForSession(session), [session]);
   const [inboxDrafts, setInboxDrafts] = useState([]);
   const fetchInbox = useCallback(async () => {
     if (!isOwner) { setInboxDrafts([]); return; }
@@ -1592,7 +1595,7 @@ function Workspace({ session }) {
               isOwner={isOwner}
               staffNotes={staffNotes}
               session={session}
-              viewer={viewerForSession(session)}
+              viewer={viewer}
               relatedKeys={relatedKeys}
               onNotesChanged={fetchStaffNotes}
               onNotice={showNotice}
@@ -1618,7 +1621,7 @@ function Workspace({ session }) {
           )}
           {view === "leave" && (
             <section className="module-frame">
-              <LeaveView viewer={viewerForSession(session)} />
+              <LeaveView viewer={viewer} />
             </section>
           )}
           {view === "center" && (
@@ -1629,22 +1632,22 @@ function Workspace({ session }) {
                 onReload={fetchCenter}
                 onNotice={showNotice}
                 session={session}
-                viewer={viewerForSession(session)}
+                viewer={viewer}
               />
             </section>
           )}
           {view === "inbox" && isOwner && (
             <InboxView drafts={inboxDrafts} onReload={fetchInbox} onNotice={showNotice} ownerId={session?.user?.id}
-              session={session} viewer={viewerForSession(session)} relatedKeys={relatedKeys} onNotesChanged={fetchStaffNotes} />
+              session={session} viewer={viewer} relatedKeys={relatedKeys} onNotesChanged={fetchStaffNotes} />
           )}
           {view === "voice" && isOwner && (
-            <VoiceLogView logs={voiceLogs} loading={false} onReload={fetchVoice} onNotice={showNotice} ownerId={session?.user?.id} session={session} viewer={viewerForSession(session)} />
+            <VoiceLogView logs={voiceLogs} loading={false} onReload={fetchVoice} onNotice={showNotice} ownerId={session?.user?.id} session={session} viewer={viewer} />
           )}
           {view === "meeting" && (
-            <MeetingView session={session} viewer={viewerForSession(session)} onNotice={showNotice} />
+            <MeetingView session={session} viewer={viewer} onNotice={showNotice} />
           )}
           {view === "staffnotes" && (
-            <StaffNotesView session={session} viewer={viewerForSession(session)} onNotice={showNotice} />
+            <StaffNotesView session={session} viewer={viewer} onNotice={showNotice} />
           )}
         </main>
       </div>

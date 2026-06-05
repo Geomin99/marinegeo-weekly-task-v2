@@ -84,8 +84,14 @@ export default function VoiceLogView({ logs, loading, onReload, onNotice, ownerI
     setConfirmRow(null);
     setBusy(true);
     try {
-      if (row.storage_path) await supabase.storage.from("voice-calls").remove([row.storage_path]);
-      await supabase.from("voice_call_logs").update({ deleted_at: new Date().toISOString() }).eq("id", row.id);
+      // DB(soft-delete) 먼저 — supabase는 에러를 값으로 반환하므로 명시적으로 확인(거짓 성공 방지)
+      const { error: delErr } = await supabase.from("voice_call_logs")
+        .update({ deleted_at: new Date().toISOString() }).eq("id", row.id);
+      if (delErr) throw delErr;
+      if (row.storage_path) {
+        const { error: rmErr } = await supabase.storage.from("voice-calls").remove([row.storage_path]);
+        if (rmErr) console.warn("음성 파일 제거 실패(레코드는 보관 처리됨):", rmErr.message);
+      }
       onNotice?.("삭제(보관)되었습니다.", "success");
       onReload?.();
     } catch (e) { onNotice?.(`삭제 실패: ${e.message}`, "error"); }

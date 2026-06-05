@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { ExternalLink, CheckCircle2, Archive, RotateCcw, Inbox, Clock, Mail, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { ErpHero } from "./ErpHero.jsx";
@@ -112,12 +112,15 @@ export default function InboxView({ drafts, onReload, onNotice, ownerId, session
       }
     }, 3000);
   }
+  // 탭 이탈/언마운트 시 스캔 폴링 인터벌 정리 (누수·언마운트 후 setState 방지)
+  useEffect(() => () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } }, []);
+
   const scanning = scan && (scan.status === "pending" || scan.status === "running");
-  const list = (drafts || []).filter((d) => !d.deleted_at);
-  const open = list.filter((d) => d.status === "needs_review")
-    .sort((a, b) => (PRIO_ORDER[a.priority] - PRIO_ORDER[b.priority]) || (a.received_at < b.received_at ? 1 : -1));
-  const handled = list.filter((d) => d.status === "done" || d.status === "archived")
-    .sort((a, b) => (a.received_at < b.received_at ? 1 : -1));
+  const list = useMemo(() => (drafts || []).filter((d) => !d.deleted_at), [drafts]);
+  const open = useMemo(() => list.filter((d) => d.status === "needs_review")
+    .sort((a, b) => (PRIO_ORDER[a.priority] - PRIO_ORDER[b.priority]) || (a.received_at < b.received_at ? 1 : -1)), [list]);
+  const handled = useMemo(() => list.filter((d) => d.status === "done" || d.status === "archived")
+    .sort((a, b) => (a.received_at < b.received_at ? 1 : -1)), [list]);
 
   const [refreshing, setRefreshing] = useState(false);
   const [confirmDel, setConfirmDel] = useState(null);

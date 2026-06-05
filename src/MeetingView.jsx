@@ -60,6 +60,8 @@ function parseParticipants(t) {
 }
 function weekStart() { const d = new Date(); const day = (d.getDay() + 6) % 7; d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - day); return d; }
 
+const DONE_MEETING = new Set(["confirmed", "done"]);  // 완료·종료된 회의 상태 (접이식 그룹)
+
 export default function MeetingView({ session, viewer, onNotice }) {
   const email = (session?.user?.email || "").toLowerCase();
   const myName = viewer?.name || null;
@@ -80,7 +82,7 @@ export default function MeetingView({ session, viewer, onNotice }) {
 
   // 전사·요약 진행 중이면 6초마다 자동 갱신 → 회사 PC 워커가 채우면 화면 자동 반영
   useEffect(() => {
-    const active = list.some(m => m.status === "transcribing" || m.status === "summarized" && !m.summary_text);
+    const active = list.some(m => m.status === "transcribing" || (m.status === "summarized" && !m.summary_text));
     if (!active) return;
     const iv = setInterval(() => reload(), 6000);
     return () => clearInterval(iv);
@@ -179,8 +181,12 @@ export default function MeetingView({ session, viewer, onNotice }) {
       }
 
       const rows = parseParticipants(form.participants).map(p => ({ ...p, meeting_id: meetingId }));
-      await supabase.from("meeting_participants").delete().eq("meeting_id", meetingId);
-      if (rows.length) await supabase.from("meeting_participants").insert(rows);
+      const { error: delErr } = await supabase.from("meeting_participants").delete().eq("meeting_id", meetingId);
+      if (delErr) throw delErr;
+      if (rows.length) {
+        const { error: insErr } = await supabase.from("meeting_participants").insert(rows);
+        if (insErr) throw insErr;
+      }
       setParts(p => ({ ...p, [meetingId]: rows }));
       onNotice?.(editing ? "회의록을 수정했습니다."
         : inputType === "audio" ? "업로드 완료 — 전사 대기열에 등록되었습니다."
@@ -231,7 +237,6 @@ export default function MeetingView({ session, viewer, onNotice }) {
   }, [list, q, fType, fStatus]);
 
   const [showDone, setShowDone] = useState(false);
-  const DONE_MEETING = new Set(["confirmed", "done"]);
   const activeMeetings = filtered.filter((m) => !DONE_MEETING.has(m.status));
   const doneMeetings = filtered.filter((m) => DONE_MEETING.has(m.status));
 
@@ -313,7 +318,7 @@ export default function MeetingView({ session, viewer, onNotice }) {
                         <button className="icon-btn" title="상세" onClick={() => openDetail(m)}>{open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</button>
                         <StaffNoteButton session={session} viewer={viewer} onNotice={onNotice}
                                          related={{ module: "meeting", id: m.id }} defaultTitle={m.title} defaultType="회의" />
-                        <button className="icon-btn" title="수정" onClick={() => setModal(m)}><Pencil size={15} /></button>
+                        <button className="icon-btn" title="수정" onClick={async () => { await loadParticipants(m.id); setModal(m); }}><Pencil size={15} /></button>
                         <button className="icon-btn danger" title="삭제" onClick={() => setConfirmDel(m)} disabled={busy}><Trash2 size={15} /></button>
                       </div>
                     </div>
