@@ -372,7 +372,7 @@ export default function MeetingView({ session, viewer, onNotice }) {
                               onSave={(form, inputType, file) => saveAny(form, modal.id ? modal : null, inputType, file)} />}
 
       {confirmDel && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.55)" }} onClick={() => setConfirmDel(null)}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.55)" }}>
           <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 20, width: "min(420px,100%)", boxShadow: "0 18px 50px rgba(0,0,0,.3)" }}>
             <h3 style={{ margin: 0, color: "#1f3a5f", fontSize: 17, fontWeight: 800 }}>회의록을 삭제할까요?</h3>
             <p style={{ margin: "8px 0 0", color: "#56657a", fontSize: 13 }}>"{confirmDel.title}"을(를) 보관 처리합니다. 목록에서 사라집니다.</p>
@@ -415,7 +415,7 @@ function MeetingModal({ init, busy, myName, participants, onClose, onSave }) {
   const TABS = [["manual", "직접작성", <PencilLine size={13} />], ["audio", "음성파일", <Mic size={13} />], ["paste", "메모 붙여넣기", <ClipboardPaste size={13} />]];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.5)" }} onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.5)" }}>
       <div className="bg-white rounded-xl shadow-xl w-full overflow-hidden" style={{ maxWidth: 620, maxHeight: "92vh", display: "flex", flexDirection: "column" }} onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 flex items-center justify-between" style={{ background: "var(--mg-navy)", color: "#fff" }}>
           <h3 className="font-bold">{editing ? "회의록 수정" : "새 회의록"}</h3>

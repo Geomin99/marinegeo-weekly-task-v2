@@ -138,7 +138,7 @@ function Toast({ notice, onClose }) {
 function ConfirmDialog({ confirm, onCancel, onConfirm }) {
   if (!confirm) return null;
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onCancel}>
+    <div className="modal-backdrop" role="presentation">
       <div className="confirm-dialog" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <div className="confirm-icon">
           <AlertCircle size={20} />

@@ -240,7 +240,7 @@ export default function StaffNotesView({ session, viewer, onNotice }) {
       {modal && isOwner && <NoteModal init={modal} busy={busy} onClose={() => setModal(null)} onSave={(f) => save(f, modal.id ? modal : null)} />}
 
       {confirmDel && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.55)" }} onClick={() => setConfirmDel(null)}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.55)" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 20, width: "min(420px,100%)", boxShadow: "0 18px 50px rgba(0,0,0,.3)" }}>
             <h3 style={{ margin: 0, color: "var(--mg-navy)", fontSize: 17, fontWeight: 800 }}>메모를 삭제할까요?</h3>
             <p style={{ margin: "8px 0 0", color: "var(--mg-sub)", fontSize: 13 }}>보관 처리되어 목록에서 사라집니다.</p>
@@ -266,7 +266,7 @@ function NoteModal({ init, busy, onClose, onSave }) {
   });
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.5)" }} onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.5)" }}>
       <div className="bg-white rounded-xl shadow-xl w-full overflow-hidden" style={{ maxWidth: 560, maxHeight: "92vh", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 flex items-center justify-between" style={{ background: "var(--mg-navy)", color: "#fff" }}>
           <div className="flex items-center gap-2"><StickyNote size={18} /><h3 className="font-bold">{editing ? "관리 메모 수정" : "새 관리 메모"}</h3></div>

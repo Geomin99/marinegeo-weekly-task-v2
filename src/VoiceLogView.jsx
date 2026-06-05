@@ -229,7 +229,7 @@ export default function VoiceLogView({ logs, loading, onReload, onNotice, ownerI
 
       {/* 삭제 확인 (브라우저 confirm 금지 — 회사 모달) */}
       {confirmRow && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.55)" }} onClick={() => setConfirmRow(null)}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.55)" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 20, width: "min(420px,100%)", boxShadow: "0 18px 50px rgba(0,0,0,.3)" }}>
             <h3 style={{ margin: 0, color: "var(--mg-navy)", fontSize: 17, fontWeight: 800 }}>통화 기록을 삭제할까요?</h3>
             <p style={{ margin: "8px 0 0", color: "var(--mg-sub)", fontSize: 13 }}>"{confirmRow.title}" 항목을 보관 처리합니다. 목록에서 사라집니다.</p>

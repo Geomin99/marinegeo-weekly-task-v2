@@ -465,7 +465,7 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
 
       {/* 등록/수정 모달 */}
       {modalOpen && (
-        <div className="modal-backdrop" role="presentation" onClick={() => !saving && setModalOpen(false)}>
+        <div className="modal-backdrop" role="presentation">
           <div className="center-modal panel" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
             <div className="center-modal-head">
               <h3>{editingId == null ? "센터 업무 등록" : "센터 업무 수정"}</h3>
@@ -549,7 +549,7 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
 
       {/* 삭제 확인 (회사 confirm 모달 — 브라우저 confirm 미사용) */}
       {confirmTask && (
-        <div className="modal-backdrop" role="presentation" onClick={() => setConfirmTask(null)}>
+        <div className="modal-backdrop" role="presentation">
           <div className="confirm-dialog" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
             <div className="confirm-icon"><AlertCircle size={20} /></div>
             <div>
@@ -566,7 +566,7 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
 
       {/* 완료 처리 모달 (완료일 선택 + 구글캘린더 opt-in) */}
       {completeTarget && (
-        <div className="modal-backdrop" role="presentation" onClick={() => !completing && setCompleteTarget(null)}>
+        <div className="modal-backdrop" role="presentation">
           <div className="center-complete panel" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
             <div className="center-modal-head">
               <h3><CheckCircle2 size={17} /> 완료 처리</h3>

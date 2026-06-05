@@ -529,7 +529,7 @@ export default function LeaveView({ viewer } = {}) {
       {/* ── 다른 직원 일정: 공개 정보만 (개인정보 보호) ───────────── */}
       {peek && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-             style={{ background: "rgba(15, 23, 42, 0.5)" }} onClick={() => setPeek(null)}>
+             style={{ background: "rgba(15, 23, 42, 0.5)" }}>
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden"
                onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-4 flex items-center justify-between" style={{ background: THEME.navy, color: "#fff" }}>
@@ -1234,7 +1234,7 @@ function GeneralEventModal({ event, onClose, onUpdated, onDeleted, onConvert }) 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-         style={{ background: "rgba(15, 23, 42, 0.5)" }} onClick={onClose}>
+         style={{ background: "rgba(15, 23, 42, 0.5)" }}>
       <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden"
            onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 flex items-center justify-between"
@@ -1603,8 +1603,7 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
   return (
     <>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-         style={{ background: "rgba(15, 23, 42, 0.5)" }}
-         onClick={onClose}>
+         style={{ background: "rgba(15, 23, 42, 0.5)" }}>
       <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden"
            onClick={(e) => e.stopPropagation()}>
         {/* 헤더 */}
@@ -1848,7 +1847,7 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
 
     {confirmKind && (
       <div className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-           style={{ background: "rgba(15,23,42,.55)" }} onClick={() => setConfirmKind(null)}>
+           style={{ background: "rgba(15,23,42,.55)" }}>
         <div onClick={(e) => e.stopPropagation()}
              style={{ background: "#fff", borderRadius: 12, padding: 20, width: "min(420px,100%)", boxShadow: "0 18px 50px rgba(0,0,0,.3)" }}>
           <h3 style={{ margin: 0, color: THEME.navy, fontSize: 17, fontWeight: 800 }}>

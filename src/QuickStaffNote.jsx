@@ -59,7 +59,7 @@ function QuickModal({ session, related, defaultTitle, defaultContent, defaultEmp
   }
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.5)" }} onClick={onClose}>
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.5)" }}>
       <div className="bg-white rounded-xl shadow-xl w-full overflow-hidden" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 flex items-center justify-between" style={{ background: "var(--mg-navy)", color: "#fff" }}>
           <div className="flex items-center gap-2"><StickyNote size={18} /><h3 className="font-bold">업무 메모로 저장</h3></div>
