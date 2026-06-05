@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { ExternalLink, CheckCircle2, Archive, RotateCcw, Inbox, Clock, Mail } from "lucide-react";
+import { ExternalLink, CheckCircle2, Archive, RotateCcw, Inbox, Clock, Mail, Trash2 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { ErpHero } from "./ErpHero.jsx";
 import { StaffNoteButton } from "./QuickStaffNote.jsx";
@@ -26,7 +26,7 @@ const PRIO_ORDER = { urgent: 0, high: 1, normal: 2, low: 3 };
 
 function fmt(s) { return s ? String(s).slice(0, 10) : ""; }
 
-function DraftCard({ d, busy, onStatus, session, viewer, hasNote, onNotesChanged, onNotice }) {
+function DraftCard({ d, busy, onStatus, session, viewer, hasNote, onNotesChanged, onNotice, onDelete }) {
   const p = PRIO[d.priority] || PRIO.normal;
   const done = d.status === "done" || d.status === "archived";
   const strip = d.status === "done" ? "green" : d.status === "archived" ? "muted"
@@ -75,6 +75,7 @@ function DraftCard({ d, busy, onStatus, session, viewer, hasNote, onNotesChanged
         {!done && (
           <button className="icon-btn" title="보관" onClick={() => onStatus(d.id, "archived")} disabled={busy}><Archive size={15} /></button>
         )}
+        <button className="icon-btn danger" title="삭제" onClick={() => onDelete(d)} disabled={busy}><Trash2 size={15} /></button>
       </div>
     </section>
   );
@@ -119,11 +120,23 @@ export default function InboxView({ drafts, onReload, onNotice, ownerId, session
     .sort((a, b) => (a.received_at < b.received_at ? 1 : -1));
 
   const [refreshing, setRefreshing] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(null);
   async function doRefresh() {
     setRefreshing(true);
     try { await onReload?.(); onNotice?.("받은편지함을 새로고침했습니다.", "success"); }
     catch (e) { onNotice?.(`새로고침 실패: ${e.message}`, "error"); }
     finally { setRefreshing(false); }
+  }
+
+  async function doDelete(row) {
+    setConfirmDel(null);
+    setBusyId(row.id);
+    const { error } = await supabase.from("inbox_action_drafts")
+      .update({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", row.id);
+    setBusyId(null);
+    if (error) { onNotice?.(`삭제 실패: ${error.message}`, "error"); return; }
+    onNotice?.("삭제(보관) 처리했습니다.", "success");
+    onReload?.();
   }
 
   async function onStatus(id, status) {
@@ -164,7 +177,7 @@ export default function InboxView({ drafts, onReload, onNotice, ownerId, session
         ) : (
           <div className="grid gap-2.5">
             {open.map((d) => <DraftCard key={d.id} d={d} busy={busyId === d.id} onStatus={onStatus}
-              session={session} viewer={viewer} hasNote={hasNoteFor(d.id)} onNotesChanged={onNotesChanged} onNotice={onNotice} />)}
+              session={session} viewer={viewer} hasNote={hasNoteFor(d.id)} onNotesChanged={onNotesChanged} onNotice={onNotice} onDelete={setConfirmDel} />)}
           </div>
         )}
 
@@ -173,11 +186,24 @@ export default function InboxView({ drafts, onReload, onNotice, ownerId, session
             <div className="text-[13px] font-bold mt-6 mb-2" style={{ color: "#637083" }}>처리됨 ({handled.length})</div>
             <div className="grid gap-2.5 opacity-80">
               {handled.map((d) => <DraftCard key={d.id} d={d} busy={busyId === d.id} onStatus={onStatus}
-                session={session} viewer={viewer} hasNote={hasNoteFor(d.id)} onNotesChanged={onNotesChanged} onNotice={onNotice} />)}
+                session={session} viewer={viewer} hasNote={hasNoteFor(d.id)} onNotesChanged={onNotesChanged} onNotice={onNotice} onDelete={setConfirmDel} />)}
             </div>
           </>
         )}
       </div>
+
+      {confirmDel && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.55)" }}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: 20, width: "min(420px,100%)", boxShadow: "0 18px 50px rgba(0,0,0,.3)" }}>
+            <h3 style={{ margin: 0, color: "var(--mg-navy)", fontSize: 17, fontWeight: 800 }}>이 항목을 삭제할까요?</h3>
+            <p style={{ margin: "8px 0 0", color: "var(--mg-sub)", fontSize: 13 }}>받은편지함 목록에서 제거됩니다. 데이터는 즉시 영구삭제되지 않고 보관 처리됩니다.</p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button onClick={() => setConfirmDel(null)} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid var(--mg-line)", background: "#fff", color: "var(--mg-sub)", fontWeight: 600, cursor: "pointer" }}>취소</button>
+              <button onClick={() => doDelete(confirmDel)} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #dc2626", background: "#dc2626", color: "#fff", fontWeight: 700, cursor: "pointer" }}>삭제</button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
