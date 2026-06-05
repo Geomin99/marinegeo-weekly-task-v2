@@ -118,6 +118,14 @@ export default function InboxView({ drafts, onReload, onNotice, ownerId, session
   const handled = list.filter((d) => d.status === "done" || d.status === "archived")
     .sort((a, b) => (a.received_at < b.received_at ? 1 : -1));
 
+  const [refreshing, setRefreshing] = useState(false);
+  async function doRefresh() {
+    setRefreshing(true);
+    try { await onReload?.(); onNotice?.("받은편지함을 새로고침했습니다.", "success"); }
+    catch (e) { onNotice?.(`새로고침 실패: ${e.message}`, "error"); }
+    finally { setRefreshing(false); }
+  }
+
   async function onStatus(id, status) {
     setBusyId(id);
     const { error } = await supabase.from("inbox_action_drafts")
@@ -140,7 +148,7 @@ export default function InboxView({ drafts, onReload, onNotice, ownerId, session
                     title="센터·받은편지함 메일을 스캔해 새 업무 초안을 만듭니다">
               <Mail size={14} className={scanning ? "erp-spin" : ""} /> {scanning ? (scan.status === "running" ? "분석 중…" : "요청됨…") : "메일 분석"}
             </button>
-            <button onClick={onReload}><RotateCcw size={14} /> 새로고침</button>
+            <button onClick={doRefresh} disabled={refreshing}><RotateCcw size={14} className={refreshing ? "erp-spin" : ""} /> {refreshing ? "새로고침 중…" : "새로고침"}</button>
           </>
         )}
       />

@@ -44,6 +44,13 @@ export default function VoiceLogView({ logs, loading, onReload, onNotice, ownerI
   const [openId, setOpenId] = useState(null);
   const [confirmRow, setConfirmRow] = useState(null);  // 삭제 확인 (브라우저 confirm 금지 — 회사 모달)
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const [refreshing, setRefreshing] = useState(false);
+  async function doRefresh() {
+    setRefreshing(true);
+    try { await onReload?.(); onNotice?.("통화 로그를 새로고침했습니다.", "success"); }
+    catch (e) { onNotice?.(`새로고침 실패: ${e.message}`, "error"); }
+    finally { setRefreshing(false); }
+  }
 
   async function handleUpload() {
     if (!file) { onNotice?.("음성파일을 선택하세요.", "error"); return; }
@@ -120,7 +127,7 @@ export default function VoiceLogView({ logs, loading, onReload, onNotice, ownerI
         title="업무 통화 로그"
         meta={`geomin99 전용 · 통화 ${list.length}건 · 전사=로컬 whisper · 요약=토심이`}
         tags={["개인 전용", "음성 비공개 보관", "외부전송 없음"]}
-        actions={<button onClick={onReload}><RotateCcw size={14} /> 새로고침</button>}
+        actions={<button onClick={doRefresh} disabled={refreshing}><RotateCcw size={14} className={refreshing ? "erp-spin" : ""} /> {refreshing ? "새로고침 중…" : "새로고침"}</button>}
       />
 
       <div className="px-1 py-4">

@@ -125,8 +125,19 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
   const [addCal, setAddCal] = useState(false);
   const [completing, setCompleting] = useState(false);
 
+  const [refreshing, setRefreshing] = useState(false);
   const notify = useCallback((m, t = "info") => onNotice?.(m, t), [onNotice]);
-  const reload = useCallback(() => onReload?.(), [onReload]);
+  const reload = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await onReload?.();
+      notify("센터 업무를 새로고침했습니다.", "success");
+    } catch (e) {
+      notify(`새로고침 실패: ${e.message}`, "error");
+    } finally {
+      setRefreshing(false);
+    }
+  }, [onReload, notify]);
 
   const counters = useMemo(() => {
     let dueSoon = 0, needCheck = 0, done = 0;
@@ -365,7 +376,7 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
         ]}
         actions={(
           <>
-            <button onClick={() => reload()}><RefreshCw size={14} /> 새로고침</button>
+            <button onClick={() => reload()} disabled={refreshing}><RefreshCw size={14} className={refreshing ? "erp-spin" : ""} /> {refreshing ? "새로고침 중…" : "새로고침"}</button>
             <button onClick={openNew}><Plus size={14} /> 새 업무</button>
           </>
         )}
@@ -414,8 +425,8 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
             {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
-        <button className="btn btn-ghost" onClick={() => reload()}>
-          <RefreshCw size={15} /> 새로고침
+        <button className="btn btn-ghost" onClick={() => reload()} disabled={refreshing}>
+          <RefreshCw size={15} className={refreshing ? "erp-spin" : ""} /> {refreshing ? "새로고침 중…" : "새로고침"}
         </button>
         <button className="btn btn-primary" onClick={openNew}>
           <Plus size={16} /> 새 업무

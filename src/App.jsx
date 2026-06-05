@@ -425,6 +425,13 @@ function EntryEditor({ entry, isCurrent, isNew, isExpanded, onToggle, onSave, on
 function JournalView({ loading, searchQuery, setSearchQuery, authorFilter, setAuthorFilter, authors, filteredEntries, newEntry, onNewEntry, onCancelNew, onSave, onDelete, onRefresh, onNotice }) {
   const [expandedIds, setExpandedIds] = useState(() => new Set());
   const [hasManualFold, setHasManualFold] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const doRefresh = async () => {
+    setRefreshing(true);
+    try { await onRefresh(false); onNotice?.("주간업무를 새로고침했습니다.", "success"); }
+    catch (e) { onNotice?.(`새로고침 실패: ${e.message}`, "error"); }
+    finally { setRefreshing(false); }
+  };
   const defaultExpandedId = useMemo(
     () => filteredEntries.find((entry) => isThisWeek(entry.thisWeekDate))?.id || filteredEntries[0]?.id || null,
     [filteredEntries],
@@ -451,7 +458,7 @@ function JournalView({ loading, searchQuery, setSearchQuery, authorFilter, setAu
         tags={["이번 주", "자동저장", "Supabase 연결"]}
         actions={(
           <>
-            <button onClick={() => onRefresh(false)}><RefreshCw size={14} /> 새로고침</button>
+            <button onClick={doRefresh} disabled={refreshing}><RefreshCw size={14} className={refreshing ? "erp-spin" : ""} /> {refreshing ? "새로고침 중…" : "새로고침"}</button>
             <button onClick={onNewEntry} disabled={newEntry !== null}><Plus size={14} /> 새 업무일지</button>
           </>
         )}
@@ -472,8 +479,8 @@ function JournalView({ loading, searchQuery, setSearchQuery, authorFilter, setAu
             {authors.map((author) => <option key={author} value={author}>{author}</option>)}
           </select>
         </div>
-        <button className="btn btn-ghost" onClick={() => onRefresh(false)}>
-          <RefreshCw size={15} /> 새로고침
+        <button className="btn btn-ghost" onClick={doRefresh} disabled={refreshing}>
+          <RefreshCw size={15} className={refreshing ? "erp-spin" : ""} /> {refreshing ? "새로고침 중…" : "새로고침"}
         </button>
         <button className="btn btn-primary" disabled={newEntry !== null} onClick={onNewEntry}>
           <Plus size={16} /> 새 업무일지
