@@ -565,6 +565,12 @@ const GOOGLE_CLIENT_ID_FALLBACK = "897631356111-45ul0ohnrosarqd669d3vlj70gg7kq2i
 const GIS_SRC = "https://accounts.google.com/gsi/client";
 const CAL_SCOPE = "https://www.googleapis.com/auth/calendar";
 const TOKEN_STORAGE_KEY = "mgeo_gcal_token_v1";
+// 한 번이라도 동의(grant)했는지 표시 — localStorage access token(1h)이 만료돼도
+// grant가 살아있으면 prompt:''(silent)로 재발급해 '확인하지 않은 앱' 경고 반복을 막는다.
+const GRANT_FLAG_KEY = "mgeo_gcal_granted_v1";
+const markGranted = () => { try { localStorage.setItem(GRANT_FLAG_KEY, "1"); } catch { /* noop */ } };
+const wasGranted = () => { try { return localStorage.getItem(GRANT_FLAG_KEY) === "1"; } catch { return false; } };
+const clearGranted = () => { try { localStorage.removeItem(GRANT_FLAG_KEY); } catch { /* noop */ } };
 const CALENDAR_STORAGE_KEY = "mgeo_gcal_calendar_id_v1";
 
 function loadStoredToken() {
@@ -639,6 +645,8 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents, onHolidays
                 : `OAuth 실패: ${resp.error}`,
             });
           }
+          // silent(prompt:'') 실패 = grant가 만료/철회됨 → 다음 연동 클릭은 consent로 복구
+          clearGranted();
           setBusy(false); return;
         }
         const newToken = {
@@ -646,6 +654,7 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents, onHolidays
           expires_at: Date.now() + (Number(resp.expires_in || 3600) - 60) * 1000,
         };
         try { localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(newToken)); } catch {}
+        markGranted();  // 동의 완료 — 이후 토큰 만료돼도 silent 재발급
         setToken(newToken);
       },
     });
@@ -801,7 +810,8 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents, onHolidays
       return;
     }
     setMsg(null); setBusy(true);
-    tokenClientRef.current.requestAccessToken({ prompt: token ? "" : "consent" });
+    // 이미 동의한 적 있으면(=grant 유효) 토큰 만료 후에도 silent로 — consent 화면 반복 방지
+    tokenClientRef.current.requestAccessToken({ prompt: wasGranted() ? "" : "consent" });
   }
 
   async function syncToCalendar(opts = {}) {
