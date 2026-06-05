@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, Component } from "react";
 import {
   StickyNote, Plus, RotateCcw, Trash2, Pencil, X, Search, Lock,
-  AlertTriangle, CheckSquare, CalendarClock, Link2,
+  AlertTriangle, CheckSquare, CalendarClock, Link2, ChevronDown, ChevronRight,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { ErpHero } from "./ErpHero.jsx";
@@ -41,6 +41,7 @@ export default function StaffNotesView({ session, viewer, onNotice }) {
   const [fStatus, setFStatus] = useState("");
   const [fModule, setFModule] = useState("");
   const [sort, setSort] = useState("recent");  // recent | followup | priority
+  const [showDone, setShowDone] = useState(false);
 
   useEffect(() => { reload(); }, []);
   async function reload() {
@@ -120,6 +121,8 @@ export default function StaffNotesView({ session, viewer, onNotice }) {
     const set = new Set(list.map((n) => n.related_module).filter(Boolean));
     return [...set];
   }, [list]);
+  const activeNotes = filtered.filter((n) => n.status !== "done" && n.status !== "archived");
+  const doneNotes = filtered.filter((n) => n.status === "done" || n.status === "archived");
 
   const kpi = useMemo(() => {
     let check = 0, overdue = 0, openN = 0, urgent = 0;
@@ -195,8 +198,8 @@ export default function StaffNotesView({ session, viewer, onNotice }) {
               {list.length === 0 ? (isOwner ? "아직 메모가 없습니다. '새 메모'로 작성하세요." : "공유된 메모가 없습니다.") : "조건에 맞는 메모가 없습니다."}
             </div>
           ) : (
-            <div className="grid gap-2.5">
-              {filtered.map((n) => {
+            (() => {
+              const renderCard = (n) => {
                 const overdue = n.follow_up_date && n.follow_up_date < tStr && n.status !== "done" && n.status !== "archived";
                 return (
                   <div key={n.id} className="rounded-xl border bg-white" style={{ borderColor: "var(--mg-line)" }}>
@@ -232,8 +235,21 @@ export default function StaffNotesView({ session, viewer, onNotice }) {
                     </div>
                   </div>
                 );
-              })}
-            </div>
+              };
+              return (
+                <>
+                  <div className="grid gap-2.5">{activeNotes.map(renderCard)}</div>
+                  {doneNotes.length > 0 && (
+                    <div className="center-done" style={{ marginTop: 14 }}>
+                      <button className="center-done-toggle" onClick={() => setShowDone((v) => !v)}>
+                        {showDone ? <ChevronDown size={16} /> : <ChevronRight size={16} />} 완료 · 보관 메모 ({doneNotes.length})
+                      </button>
+                      {showDone && <div className="grid gap-2.5" style={{ marginTop: 6 }}>{doneNotes.map(renderCard)}</div>}
+                    </div>
+                  )}
+                </>
+              );
+            })()
           )}
       </div>
 

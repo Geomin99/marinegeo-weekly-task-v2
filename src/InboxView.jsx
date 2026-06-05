@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { ExternalLink, CheckCircle2, Archive, RotateCcw, Inbox, Clock, Mail, Trash2 } from "lucide-react";
+import { ExternalLink, CheckCircle2, Archive, RotateCcw, Inbox, Clock, Mail, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { ErpHero } from "./ErpHero.jsx";
 import { StaffNoteButton } from "./QuickStaffNote.jsx";
@@ -121,6 +121,7 @@ export default function InboxView({ drafts, onReload, onNotice, ownerId, session
 
   const [refreshing, setRefreshing] = useState(false);
   const [confirmDel, setConfirmDel] = useState(null);
+  const [showHandled, setShowHandled] = useState(false);
   async function doRefresh() {
     setRefreshing(true);
     try { await onReload?.(); onNotice?.("받은편지함을 새로고침했습니다.", "success"); }
@@ -182,13 +183,17 @@ export default function InboxView({ drafts, onReload, onNotice, ownerId, session
         )}
 
         {handled.length > 0 && (
-          <>
-            <div className="text-[13px] font-bold mt-6 mb-2" style={{ color: "#637083" }}>처리됨 ({handled.length})</div>
-            <div className="grid gap-2.5 opacity-80">
-              {handled.map((d) => <DraftCard key={d.id} d={d} busy={busyId === d.id} onStatus={onStatus}
-                session={session} viewer={viewer} hasNote={hasNoteFor(d.id)} onNotesChanged={onNotesChanged} onNotice={onNotice} onDelete={setConfirmDel} />)}
-            </div>
-          </>
+          <div className="center-done" style={{ marginTop: 18 }}>
+            <button className="center-done-toggle" onClick={() => setShowHandled((v) => !v)}>
+              {showHandled ? <ChevronDown size={16} /> : <ChevronRight size={16} />} 처리됨 ({handled.length})
+            </button>
+            {showHandled && (
+              <div className="grid gap-2.5 opacity-80" style={{ marginTop: 6 }}>
+                {handled.map((d) => <DraftCard key={d.id} d={d} busy={busyId === d.id} onStatus={onStatus}
+                  session={session} viewer={viewer} hasNote={hasNoteFor(d.id)} onNotesChanged={onNotesChanged} onNotice={onNotice} onDelete={setConfirmDel} />)}
+              </div>
+            )}
+          </div>
         )}
       </div>
 

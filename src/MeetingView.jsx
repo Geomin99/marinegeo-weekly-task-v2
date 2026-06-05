@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, Component } from "react";
 import {
   Users, Plus, RotateCcw, Trash2, Pencil, X, Search,
-  ClipboardList, CheckSquare, AlertTriangle, ChevronDown, ChevronUp, Lock,
+  ClipboardList, CheckSquare, AlertTriangle, ChevronDown, ChevronUp, ChevronRight, Lock,
   Upload, FileAudio, Mic, ClipboardPaste, PencilLine, ShieldAlert,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
@@ -230,6 +230,11 @@ export default function MeetingView({ session, viewer, onNotice }) {
     });
   }, [list, q, fType, fStatus]);
 
+  const [showDone, setShowDone] = useState(false);
+  const DONE_MEETING = new Set(["confirmed", "done"]);
+  const activeMeetings = filtered.filter((m) => !DONE_MEETING.has(m.status));
+  const doneMeetings = filtered.filter((m) => DONE_MEETING.has(m.status));
+
   return (
     <MeetErrorBoundary>
     <section className="module-frame">
@@ -282,8 +287,8 @@ export default function MeetingView({ session, viewer, onNotice }) {
               {list.length === 0 ? "아직 회의록이 없습니다. '새 회의록'으로 등록하세요." : "조건에 맞는 회의록이 없습니다."}
             </div>
           ) : (
-            <div className="grid gap-2.5">
-              {filtered.map(m => {
+            (() => {
+              const renderCard = (m) => {
                 const open = openId === m.id;
                 const taskN = Array.isArray(m.action_items) ? m.action_items.length : 0;
                 return (
@@ -361,8 +366,21 @@ export default function MeetingView({ session, viewer, onNotice }) {
                     )}
                   </div>
                 );
-              })}
-            </div>
+              };
+              return (
+                <>
+                  <div className="grid gap-2.5">{activeMeetings.map(renderCard)}</div>
+                  {doneMeetings.length > 0 && (
+                    <div className="center-done" style={{ marginTop: 14 }}>
+                      <button className="center-done-toggle" onClick={() => setShowDone((v) => !v)}>
+                        {showDone ? <ChevronDown size={16} /> : <ChevronRight size={16} />} 완료 · 종료된 회의 ({doneMeetings.length})
+                      </button>
+                      {showDone && <div className="grid gap-2.5" style={{ marginTop: 6 }}>{doneMeetings.map(renderCard)}</div>}
+                    </div>
+                  )}
+                </>
+              );
+            })()
           )}
       </div>
 
