@@ -79,13 +79,19 @@ Deno.serve(async (req) => {
     }
 
     if (body.action === "fail") {
-      // 재시도 허용: processing_started_at 해제. retry_count 누적.
+      // 서버에서 retry_count를 +1 누적(클라값 신뢰 X). 임계 초과 시 재큐 중단 → draft로 내려 사람이 확인.
+      const MAX_RETRY = 5;
+      const { data: cur } = await sb.from("meetings").select("retry_count").eq("id", body.id).maybeSingle();
+      const nextRetry = (cur?.retry_count ?? 0) + 1;
+      const stopped = nextRetry >= MAX_RETRY;
       await sb.from("meetings").update({
-        error_message: (body.error_message || "").slice(0, 400),
-        retry_count: (body.retry_count ?? 0),
-        processing_started_at: null, updated_at: now,
+        error_message: (stopped ? `전사 ${nextRetry}회 실패 — 중단: ` : "") + (body.error_message || "").slice(0, 350),
+        retry_count: nextRetry,
+        // 중단 시 status=draft → claim 대상에서 제외(claim은 transcribing만). 재시도 시엔 processing_started_at 해제.
+        ...(stopped ? { status: "draft", processing_started_at: now } : { processing_started_at: null }),
+        updated_at: now,
       }).eq("id", body.id);
-      return Response.json({ ok: true });
+      return Response.json({ ok: true, retry_count: nextRetry, stopped });
     }
 
     return new Response(JSON.stringify({ error: "unknown action" }), { status: 400, headers: { "Content-Type": "application/json" } });

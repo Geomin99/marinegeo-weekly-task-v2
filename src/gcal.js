@@ -168,13 +168,13 @@ export async function syncLeaveRequests(requests) {
       if (req.google_calendar_event_id && req.calendar_sync_signature === sig) continue;
       const startDate = req.start_date;
       const endDate = req.end_date || req.start_date;
-      const summary = `[${req.author}] ${req.leave_type_name || "휴가"}${req.destination ? ` - ${req.destination}` : ""}`;
-      const description = [
-        `상태: ${LEAVE_STATUS_KO[req.status] || req.status}`,
-        req.memo && `메모: ${req.memo}`,
-        req.companions && `동행: ${req.companions}`,
-        req.trip_purpose && `목적: ${req.trip_purpose}`,
-      ].filter(Boolean).join("\n");
+      // 공유 캘린더 개인정보 분리: 휴가 종류는 일반화, 메모·동행·목적은 미노출(description 비움).
+      // 업무 조율상 출장/외근의 목적지만 유지. (포테토뭉 검토 2026-06-06)
+      const lt = req.leave_type_name || "";
+      const publicType = lt.includes("출장") ? "출장" : lt.includes("외근") ? "외근" : "휴가";
+      const publicDest = (publicType === "출장" || publicType === "외근") ? (req.destination || "") : "";
+      const summary = publicDest ? `[${req.author}] ${publicType} - ${publicDest}` : `[${req.author}] ${publicType}`;
+      const description = "";
       let event;
       if (req.is_all_day === false && req.start_time && req.end_time) {
         const startISO = `${startDate}T${req.start_time.slice(0, 8)}+09:00`;

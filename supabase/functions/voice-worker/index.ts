@@ -67,11 +67,14 @@ Deno.serve(async (req) => {
     }
 
     if (body.action === "fail") {
+      // status=failed는 terminal(재claim은 pending만)이라 루프 없음. retry_count는 서버에서 +1 누적(정확 기록).
+      const { data: cur } = await sb.from("voice_call_logs").select("retry_count").eq("id", body.id).maybeSingle();
+      const nextRetry = (cur?.retry_count ?? 0) + 1;
       await sb.from("voice_call_logs").update({
         status: "failed", error_message: (body.error_message || "").slice(0, 400),
-        retry_count: (body.retry_count ?? 0), processed_at: now, updated_at: now,
+        retry_count: nextRetry, processed_at: now, updated_at: now,
       }).eq("id", body.id);
-      return Response.json({ ok: true });
+      return Response.json({ ok: true, retry_count: nextRetry });
     }
 
     return new Response(JSON.stringify({ error: "unknown action" }), { status: 400, headers: { "Content-Type": "application/json" } });
