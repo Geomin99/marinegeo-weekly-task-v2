@@ -49,6 +49,20 @@ export const MODULE_LABEL = {
 export const PRIORITY_FROM_DRAFT = { urgent: "긴급", high: "높음", normal: "보통", low: "낮음" };
 
 // owner가 '직원 메모로 저장' 시 공통 INSERT (author_email은 RLS와 일치해야 함)
+// 2026-06-08 0020 마이그레이션 RPC: 담당자(본인)가 메모 응답·상태 갱신
+// 허용 status: open / in_progress / done. 다른 컬럼은 RPC 내부에서 봉쇄.
+export async function respondToStaffNote(session, { id, status, responseText }) {
+  if (!id) throw new Error("id 없음");
+  if (!["open", "in_progress", "done"].includes(status)) throw new Error("status 잘못됨");
+  const { data, error } = await supabase.rpc("staff_note_respond", {
+    p_id: id,
+    p_status: status,
+    p_response_text: responseText ?? "",
+  });
+  if (error) throw error;
+  return data;
+}
+
 export async function createStaffNote(session, payload) {
   const email = (session?.user?.email || "").toLowerCase();
   return supabase.from("staff_notes").insert({

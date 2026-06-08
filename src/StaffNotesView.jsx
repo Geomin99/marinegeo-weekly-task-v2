@@ -8,6 +8,7 @@ import { ErpHero } from "./ErpHero.jsx";
 import {
   STAFF, nameForEmail, MEMO_TYPES, TYPE_COLORS, PRIORITIES, PRIORITY_COLORS,
   STATUSES, STATUS_COLORS, statusLabel, VISIBILITIES, visLabel, MODULE_LABEL, createStaffNote,
+  respondToStaffNote,
 } from "./staffNotes";
 
 class NoteErrorBoundary extends Component {
@@ -94,6 +95,22 @@ export default function StaffNotesView({ session, viewer, onNotice }) {
       if (error) throw error;
       onNotice?.("확인했습니다.", "success"); reload();
     } catch (e) { onNotice?.(`확인 실패: ${e.message}`, "error"); }
+    setBusy(false);
+  }
+
+  // 2026-06-08 0020: 직원이 본인 메모에 진행 상태·답변 갱신
+  const [respondDraft, setRespondDraft] = useState({});  // { [noteId]: { status, text, open } }
+  async function submitResponse(row) {
+    const draft = respondDraft[row.id] || {};
+    const status = draft.status || row.status || "in_progress";
+    const text = (draft.text ?? row.response_text ?? "").trim();
+    setBusy(true);
+    try {
+      await respondToStaffNote(session, { id: row.id, status, responseText: text });
+      onNotice?.("후속조치가 저장되었습니다.", "success");
+      setRespondDraft((d) => ({ ...d, [row.id]: { ...d[row.id], open: false } }));
+      reload();
+    } catch (e) { onNotice?.(`저장 실패: ${e.message}`, "error"); }
     setBusy(false);
   }
 
@@ -233,6 +250,59 @@ export default function StaffNotesView({ session, viewer, onNotice }) {
                         <button className="btn btn-primary shrink-0" style={{ padding: "5px 12px", fontSize: 12.5 }} onClick={() => acknowledge(n)} disabled={busy}>확인</button>
                       ) : null}
                     </div>
+                    {/* 2026-06-08 0020 후속조치 응답 영역 — 본인 메모이면서 확인 완료한 경우 */}
+                    {(() => {
+                      const isMine = (n.visibility === "employee" || n.visibility === "team") && (n.employee_id || "").toLowerCase() === email;
+                      const hasResponse = !!(n.response_text || n.response_at);
+                      if (!hasResponse && !isMine) return null;
+                      const draft = respondDraft[n.id] || {};
+                      const draftOpen = draft.open === true;
+                      const draftStatus = draft.status || n.status || "in_progress";
+                      const draftText = draft.text ?? n.response_text ?? "";
+                      return (
+                        <div className="px-4 pb-4 pt-0 border-t" style={{ borderColor: "var(--mg-line)" }}>
+                          {hasResponse && (
+                            <div className="mt-3 p-3 rounded-lg" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
+                              <div className="text-[11.5px] font-bold mb-1" style={{ color: "#15803d" }}>
+                                후속조치 답변 · {nameForEmail(n.response_by) || n.response_by || "직원"} · {String(n.response_at || "").slice(0, 16).replace("T", " ")}
+                              </div>
+                              <div className="text-[13px] whitespace-pre-wrap" style={{ color: "#142033" }}>{n.response_text || "(상태만 변경됨)"}</div>
+                            </div>
+                          )}
+                          {isMine && !draftOpen && (
+                            <button className="mt-3 btn" style={{ background: "#fff", border: "1px solid var(--mg-line)", color: "var(--mg-navy)", padding: "6px 14px", fontSize: 12.5, fontWeight: 700 }}
+                                    onClick={() => setRespondDraft((d) => ({ ...d, [n.id]: { ...d[n.id], open: true, status: draftStatus, text: draftText } }))}>
+                              {hasResponse ? "답변 수정" : "후속조치 답변 작성"}
+                            </button>
+                          )}
+                          {isMine && draftOpen && (
+                            <div className="mt-3 space-y-2">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-[12px] font-bold" style={{ color: "var(--mg-sub)" }}>진행 상태</span>
+                                <select value={draftStatus}
+                                        onChange={(e) => setRespondDraft((d) => ({ ...d, [n.id]: { ...d[n.id], status: e.target.value, open: true } }))}
+                                        className="px-2 py-1 border rounded-md text-[12.5px]" style={{ borderColor: "var(--mg-line)" }}>
+                                  <option value="open">접수</option>
+                                  <option value="in_progress">진행중</option>
+                                  <option value="done">완료</option>
+                                </select>
+                              </div>
+                              <textarea value={draftText}
+                                        onChange={(e) => setRespondDraft((d) => ({ ...d, [n.id]: { ...d[n.id], text: e.target.value, open: true } }))}
+                                        rows={3}
+                                        placeholder="진행 상황·완료 보고를 작성하세요"
+                                        className="w-full px-3 py-2 border rounded-md text-[13px] resize-y" style={{ borderColor: "var(--mg-line)" }} />
+                              <div className="flex justify-end gap-2">
+                                <button className="btn" style={{ background: "#fff", border: "1px solid var(--mg-line)", color: "var(--mg-sub)", padding: "6px 14px", fontSize: 12.5, fontWeight: 600 }}
+                                        onClick={() => setRespondDraft((d) => ({ ...d, [n.id]: { ...d[n.id], open: false } }))} disabled={busy}>취소</button>
+                                <button className="btn btn-primary" style={{ padding: "6px 14px", fontSize: 12.5, fontWeight: 700 }}
+                                        onClick={() => submitResponse(n)} disabled={busy}>저장</button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               };
