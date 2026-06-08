@@ -493,6 +493,7 @@ export default function LeaveView({ viewer } = {}) {
           leaveTypes={leaveTypes}
           authors={balances.map(b => b.author)}
           isOwner={canSeeAll}
+          viewerName={viewerName}
           holidays={holidays}
           onClose={() => setModalOpen(false)}
           onSaved={() => { setModalOpen(false); reloadAll(); }}
@@ -1341,13 +1342,18 @@ function GeneralEventModal({ event, onClose, onUpdated, onDeleted, onConvert }) 
 // ─────────────────────────────────────────────────────────────
 // 신청·수정 모달
 // ─────────────────────────────────────────────────────────────
-function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSaved, onExternalDeleted, onConvertedToGeneral, onBackToGeneral, isOwner }) {
+function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSaved, onExternalDeleted, onConvertedToGeneral, onBackToGeneral, isOwner, viewerName }) {
   const isEdit = !!init?.request;
   const existing = init?.request;
   const ext = init?.externalEvent;  // 외부 MGEO 이벤트 → 변환 모드
   // authors prop이 없거나 비어 있으면 기본 직원 명단 사용
   // 신청자(성명)에는 직원 + 대표(여은민) 모두 포함 (대표도 본인 일정 등록)
   const authorOptions = Array.from(new Set([...((authors && authors.length) ? authors : DEFAULT_AUTHORS), APPROVER_NAME]));
+  // 2026-06-08 권한 분리 수정: owner(대표)는 전체 선택 가능, 직원은 본인만 선택 가능
+  // 기존 신청 수정 시에는 author 변경 불가(대표만 가능) — existing.author 그대로 유지
+  const selectableAuthors = isOwner
+    ? authorOptions
+    : (viewerName ? authorOptions.filter(n => n === viewerName) : []);
   // 상태 변경(승인/반려/취소)은 대표가 기존 신청을 수정할 때만. 신청 단계는 '신청'(pending) 고정.
   const canSetStatus = isOwner && isEdit;
 
@@ -1362,7 +1368,12 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
     return fallback?.id || leaveTypes[0]?.id || "";
   }, [ext, leaveTypes]);
 
-  const [author, setAuthor] = useState(existing?.author || authorOptions[0] || "");
+  // 2026-06-08 권한 분리: 직원 로그인 시 본인 이름으로 초기화 (기존 신청 수정 시 existing.author 우선)
+  const [author, setAuthor] = useState(
+    existing?.author
+    || (!isOwner && viewerName ? viewerName : authorOptions[0])
+    || ""
+  );
   const [leaveTypeId, setLeaveTypeId] = useState(existing?.leave_type_id || extDefaultTypeId || (leaveTypes[0]?.id || ""));
   const [startDate, setStartDate] = useState(existing?.start_date || ext?._start || ext?.start_date || init?.date || ymd(new Date()));
   const [endDate, setEndDate] = useState(existing?.end_date || existing?.start_date || ext?._end || ext?._start || init?.date || ymd(new Date()));
@@ -1662,9 +1673,11 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
           <div className="grid grid-cols-3 gap-3">
             <label className="col-span-1 self-center font-semibold" style={{ color: THEME.sub }}>성명</label>
             <select value={author} onChange={(e) => setAuthor(e.target.value)}
-                    className="col-span-2 px-3 py-2 border rounded-md outline-none"
+                    disabled={!isOwner && !!viewerName && selectableAuthors.length <= 1}
+                    className="col-span-2 px-3 py-2 border rounded-md outline-none disabled:bg-gray-50 disabled:text-gray-600"
                     style={{ borderColor: THEME.line }}>
-              {authorOptions.map(name => (
+              {/* 2026-06-08 권한 분리: 직원은 본인만 선택 가능 */}
+              {selectableAuthors.map(name => (
                 <option key={name} value={name}>{name}</option>
               ))}
             </select>
