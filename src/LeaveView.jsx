@@ -284,6 +284,7 @@ export default function LeaveView({ viewer } = {}) {
   const [showBalances, setShowBalances] = useState(false);  // 개인정보 보호 — 기본 숨김
   const [calEvents, setCalEvents] = useState([]);  // 달력 그리드용(공개 뷰 — 전원, 개인정보 컬럼 제외)
   const [peek, setPeek] = useState(null);  // 다른 직원 일정 클릭 시 공개 정보만 표시
+  // 참고: +N건 클릭 모달은 CalendarGrid 컴포넌트 내부 state로 이동 (그 컴포넌트 안에서만 사용)
 
   // 초기 로드
   useEffect(() => { reloadAll(); }, []);
@@ -955,6 +956,7 @@ function layoutWeek(week, events) {
 }
 
 function CalendarGrid({ cells, events, onCellClick, onEventClick, today, holidays }) {
+  const [expandedDate, setExpandedDate] = useState(null);  // 2026-06-08: +N건 클릭 시 그 날 전체 일정 모달
   const todayStr = ymd(today);
   const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
   const MAX_SLOTS = 4;
@@ -1079,15 +1081,17 @@ function CalendarGrid({ cells, events, onCellClick, onEventClick, today, holiday
                   </div>
                 );
               })}
-              {/* +N건 표시 (MAX_SLOTS 초과) */}
+              {/* +N건 표시 (MAX_SLOTS 초과) — 2026-06-08: 클릭 시 그 날의 모든 일정 모달 */}
               {Object.entries(overflowByCol).map(([col, n]) => (
                 <div key={"of-" + col}
-                     className="absolute text-[11px] font-bold pointer-events-none"
+                     onClick={(e) => { e.stopPropagation(); setExpandedDate(week[Number(col)].date); }}
+                     className="absolute text-[11px] font-bold pointer-events-auto cursor-pointer hover:underline"
                      style={{
                        left: `calc(${(Number(col) / 7) * 100}% + 6px)`,
                        top: HEADER_HEIGHT + MAX_SLOTS * (BAR_HEIGHT + BAR_GAP) + 2,
                        color: THEME.accent,
-                     }}>
+                     }}
+                     title="클릭해서 그 날의 모든 일정 보기">
                   +{n}건
                 </div>
               ))}
@@ -1105,6 +1109,62 @@ function CalendarGrid({ cells, events, onCellClick, onEventClick, today, holiday
           </div>
         );
       })}
+
+      {/* 2026-06-08 +N건 클릭 모달 — 그 날짜에 걸친 모든 일정 표시 */}
+      {expandedDate && (() => {
+        const targetStr = ymd(expandedDate);
+        const dayEvents = (events || []).filter(ev => {
+          const s = ev._start || ev.start_date;
+          const e = ev._end || ev.end_date || s;
+          return s && e && s <= targetStr && targetStr <= e;
+        });
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+               style={{ background: "rgba(15, 23, 42, 0.5)" }}
+               onClick={() => setExpandedDate(null)}>
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden"
+                 onClick={(e) => e.stopPropagation()}>
+              <div className="px-5 py-4 flex items-center justify-between"
+                   style={{ background: THEME.navy, color: "#fff" }}>
+                <div className="flex items-center gap-2">
+                  <CalendarIcon size={18} />
+                  <h3 className="font-bold">{targetStr} · 전체 일정 ({dayEvents.length}건)</h3>
+                </div>
+                <button onClick={() => setExpandedDate(null)} className="hover:opacity-70"><X size={18} /></button>
+              </div>
+              <div className="p-4 space-y-2 max-h-96 overflow-y-auto">
+                {dayEvents.length === 0 && (
+                  <div className="text-sm text-center py-6" style={{ color: THEME.sub }}>일정 없음</div>
+                )}
+                {dayEvents.map((ev, idx) => {
+                  const isExternal = ev.is_external;
+                  const cat = CATEGORY_COLORS[eventCategory(ev)] || CATEGORY_COLORS.etc;
+                  const label = isExternal
+                    ? `${ev.start_time ? `🕐 ${ev.start_time} ` : "📅 "}${ev.summary}`
+                    : `${ev.leave_type_name === "출장" ? "✈ " : ""}${ev.author} · ${ev.leave_type_name}${ev.destination ? " · " + ev.destination : ""}`;
+                  return (
+                    <button key={(ev.id || "x") + "-exp-" + idx}
+                            onClick={() => { setExpandedDate(null); onEventClick(ev); }}
+                            className="w-full text-left rounded-md px-3 py-2 hover:opacity-90 transition"
+                            style={{ background: cat.bg, color: cat.fg, borderLeft: `4px solid ${cat.dot}` }}>
+                      <div className="text-sm font-semibold truncate">{label}</div>
+                      <div className="text-xs opacity-75 mt-0.5">
+                        {(ev._start || ev.start_date)}{(ev._end || ev.end_date) && (ev._end || ev.end_date) !== (ev._start || ev.start_date) ? ` ~ ${ev._end || ev.end_date}` : ""}
+                        {!isExternal && ev.status ? ` · ${statusKo(ev.status)}` : ""}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="px-5 py-3 flex justify-end border-t" style={{ borderColor: THEME.line }}>
+                <button onClick={() => setExpandedDate(null)}
+                        className="px-4 py-2 text-sm font-semibold rounded-md text-white"
+                        style={{ background: THEME.navy }}>닫기</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
