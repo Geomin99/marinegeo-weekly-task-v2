@@ -126,18 +126,84 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
   const [completing, setCompleting] = useState(false);
 
   const [refreshing, setRefreshing] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const notify = useCallback((m, t = "info") => onNotice?.(m, t), [onNotice]);
+
+  // scan_requests 폴링 — done/failed 까지 대기 (워커 1분 폴링이라 최대 90초)
+  const pollScanRequest = useCallback(async (id, timeoutMs = 90000) => {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const { data, error } = await supabase
+        .from("scan_requests")
+        .select("id, status, center_created_count, error_message")
+        .eq("id", id)
+        .maybeSingle();
+      if (error) throw error;
+      if (data && (data.status === "done" || data.status === "failed")) return data;
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+    return { id, status: "timeout", center_created_count: 0, error_message: null };
+  }, []);
+
+  // 센터 새로고침 = Gmail 분석 요청 + fetchCenter (포테토뭉 권고: fetchCenter 자체는 불변)
   const reload = useCallback(async () => {
+    if (scanning) return;
+    const ownerId = session?.user?.id;
+    if (!ownerId) {
+      notify("로그인 정보가 없어 새로고침할 수 없습니다.", "error");
+      return;
+    }
+    setScanning(true);
     setRefreshing(true);
     try {
+      // 1. scan_requests insert (scope='center', unique 충돌 시 기존 active 요청 재사용)
+      let requestId;
+      const ins = await supabase
+        .from("scan_requests")
+        .insert({ owner: ownerId, scope: "center", requested_by: ownerId })
+        .select("id")
+        .maybeSingle();
+      if (ins.error) {
+        if (ins.error.code === "23505") {
+          const { data: active, error: actErr } = await supabase
+            .from("scan_requests")
+            .select("id")
+            .eq("owner", ownerId)
+            .in("status", ["pending", "running"])
+            .order("requested_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (actErr) throw actErr;
+          requestId = active?.id;
+          if (!requestId) throw new Error("진행 중인 요청을 찾지 못했습니다.");
+        } else {
+          throw ins.error;
+        }
+      } else {
+        requestId = ins.data?.id;
+      }
+      notify("Gmail에서 새 센터 메일을 가져오는 중입니다.", "info");
+      // 2. 폴링
+      const result = await pollScanRequest(requestId);
+      // 3. fetchCenter 재호출 (포테토뭉 권고: 항상 fetchCenter 호출 — pending 잔여 케이스 대비)
       await onReload?.();
-      notify("센터 업무를 새로고침했습니다.", "success");
+      // 4. 결과별 안내
+      if (result.status === "failed") {
+        notify(`Gmail 분석 실패: ${result.error_message || "원인 미상"}`, "error");
+      } else if (result.status === "timeout") {
+        notify("워커 처리가 지연되고 있습니다. 잠시 뒤 새로고침을 다시 눌러주세요.", "info");
+      } else if ((result.center_created_count || 0) === 0) {
+        notify("새 메일은 없습니다. 화면을 갱신했습니다.", "info");
+      } else {
+        notify(`Gmail에서 ${result.center_created_count}건이 새로 추가됐습니다.`, "success");
+      }
     } catch (e) {
-      notify(`새로고침 실패: ${e.message}`, "error");
+      notify(`새로고침 실패: ${e.message || e}`, "error");
     } finally {
+      setScanning(false);
       setRefreshing(false);
     }
-  }, [onReload, notify]);
+  }, [scanning, session, notify, onReload, pollScanRequest]);
 
   const counters = useMemo(() => {
     let dueSoon = 0, needCheck = 0, done = 0;
@@ -372,11 +438,11 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
         tags={[
           "수동 업무판",
           ...(counters.dueSoon > 0 ? [{ label: `마감 임박 ${counters.dueSoon}`, hot: true }] : []),
-          "Gmail 연동 대기",
+          ...(scanning ? [{ label: "Gmail 분석 중", hot: true }] : []),
         ]}
         actions={(
           <>
-            <button onClick={() => reload()} disabled={refreshing}><RefreshCw size={14} className={refreshing ? "erp-spin" : ""} /> {refreshing ? "새로고침 중…" : "새로고침"}</button>
+            <button onClick={() => reload()} disabled={refreshing}><RefreshCw size={14} className={refreshing ? "erp-spin" : ""} /> {scanning ? "Gmail 분석 중…" : (refreshing ? "새로고침 중…" : "새로고침")}</button>
             <button onClick={openNew}><Plus size={14} /> 새 업무</button>
           </>
         )}
@@ -426,7 +492,7 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
           </select>
         </div>
         <button className="btn btn-ghost" onClick={() => reload()} disabled={refreshing}>
-          <RefreshCw size={15} className={refreshing ? "erp-spin" : ""} /> {refreshing ? "새로고침 중…" : "새로고침"}
+          <RefreshCw size={15} className={refreshing ? "erp-spin" : ""} /> {scanning ? "Gmail 분석 중…" : (refreshing ? "새로고침 중…" : "새로고침")}
         </button>
         <button className="btn btn-primary" onClick={openNew}>
           <Plus size={16} /> 새 업무
