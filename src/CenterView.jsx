@@ -145,8 +145,19 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
     return { id, status: "timeout", center_created_count: 0, error_message: null };
   }, []);
 
-  // 센터 새로고침 = Gmail 분석 요청 + fetchCenter (포테토뭉 권고: fetchCenter 자체는 불변)
+  // 단순 새로고침 = fetchCenter (저장·삭제·완료 처리 후 호출)
+  // 2026-06-12 회귀 fix: reload 의미를 단순 SELECT로 복원. Gmail 분석은 refreshAndScan에 분리.
   const reload = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await onReload?.();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [onReload]);
+
+  // Toolbar 새로고침 버튼 전용 = scan_requests 트리거 + 폴링 + fetchCenter
+  const refreshAndScan = useCallback(async () => {
     if (scanning) return;
     const ownerId = session?.user?.id;
     if (!ownerId) {
@@ -183,11 +194,8 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
         requestId = ins.data?.id;
       }
       notify("Gmail에서 새 센터 메일을 가져오는 중입니다.", "info");
-      // 2. 폴링
       const result = await pollScanRequest(requestId);
-      // 3. fetchCenter 재호출 (포테토뭉 권고: 항상 fetchCenter 호출 — pending 잔여 케이스 대비)
       await onReload?.();
-      // 4. 결과별 안내
       if (result.status === "failed") {
         notify(`Gmail 분석 실패: ${result.error_message || "원인 미상"}`, "error");
       } else if (result.status === "timeout") {
@@ -442,7 +450,7 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
         ]}
         actions={(
           <>
-            <button onClick={() => reload()} disabled={refreshing}><RefreshCw size={14} className={refreshing ? "erp-spin" : ""} /> {scanning ? "Gmail 분석 중…" : (refreshing ? "새로고침 중…" : "새로고침")}</button>
+            <button onClick={() => refreshAndScan()} disabled={refreshing || scanning}><RefreshCw size={14} className={refreshing ? "erp-spin" : ""} /> {scanning ? "Gmail 분석 중…" : (refreshing ? "새로고침 중…" : "새로고침")}</button>
             <button onClick={openNew}><Plus size={14} /> 새 업무</button>
           </>
         )}
@@ -491,7 +499,7 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
             {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
-        <button className="btn btn-ghost" onClick={() => reload()} disabled={refreshing}>
+        <button className="btn btn-ghost" onClick={() => refreshAndScan()} disabled={refreshing || scanning}>
           <RefreshCw size={15} className={refreshing ? "erp-spin" : ""} /> {scanning ? "Gmail 분석 중…" : (refreshing ? "새로고침 중…" : "새로고침")}
         </button>
         <button className="btn btn-primary" onClick={openNew}>
