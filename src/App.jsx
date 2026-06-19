@@ -366,11 +366,11 @@ function EntryEditor({ entry, isCurrent, isNew, isExpanded, onToggle, onSave, on
               <input value={localData.author} onChange={(e) => handleChange("author", e.target.value)} placeholder="이름" />
             </label>
             <label>
-              <span>이번 주 시작일</span>
+              <span>지난 주 시작일</span>
               <input type="date" value={localData.thisWeekDate} onChange={(e) => handleChange("thisWeekDate", e.target.value)} />
             </label>
             <label>
-              <span>다음 주 시작일</span>
+              <span>이번 주 시작일</span>
               <input type="date" value={localData.nextWeekDate} disabled />
             </label>
           </div>
@@ -379,7 +379,7 @@ function EntryEditor({ entry, isCurrent, isNew, isExpanded, onToggle, onSave, on
             <section className="sheet-column this-week">
               <div className="sheet-head">
                 <Clock3 size={16} />
-                <span>이번 주 수행</span>
+                <span>지난 주 수행</span>
               </div>
               <AutoResizeTextarea
                 value={localData.thisWeekTasks}
@@ -392,7 +392,7 @@ function EntryEditor({ entry, isCurrent, isNew, isExpanded, onToggle, onSave, on
             <section className="sheet-column next-week">
               <div className="sheet-head">
                 <CalendarDays size={16} />
-                <span>다음 주 계획</span>
+                <span>이번 주 계획</span>
               </div>
               <AutoResizeTextarea
                 value={localData.nextWeekTasks}
