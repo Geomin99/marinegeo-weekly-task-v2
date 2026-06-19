@@ -96,6 +96,18 @@ function getNextMonday(dateStr) {
   return formatYMD(d);
 }
 
+function addDays(dateStr, n) {
+  const d = new Date(`${dateStr}T00:00:00`);
+  d.setDate(d.getDate() + n);
+  return formatYMD(d);
+}
+
+// 단일 날짜("이번 주 시작일"=thisWeekDate=W) 아래 보조 안내: 지난주(W-1)·이번주(W) 실제 기간.
+function weekRangeHint(thisWeekDate) {
+  if (!thisWeekDate) return "";
+  return `지난 주 수행: ${addDays(thisWeekDate, -7)} ~ ${addDays(thisWeekDate, -1)}  ·  이번 주 계획: ${thisWeekDate} ~ ${addDays(thisWeekDate, 6)}`;
+}
+
 function getWeekInfo(dateStr) {
   if (!dateStr) return "";
   const d = new Date(`${dateStr}T00:00:00`);
@@ -338,7 +350,7 @@ function EntryEditor({ entry, isCurrent, isNew, isExpanded, onToggle, onSave, on
               {isCurrent && <span className="badge blue">이번 주</span>}
               {isNew && <span className="badge amber">신규</span>}
             </div>
-            <p>{localData.thisWeekDate} 시작 · 다음 주 {localData.nextWeekDate}</p>
+            <p>이번 주 {localData.thisWeekDate} 시작</p>
           </div>
         </button>
         <div className="work-actions">
@@ -366,13 +378,12 @@ function EntryEditor({ entry, isCurrent, isNew, isExpanded, onToggle, onSave, on
               <input value={localData.author} onChange={(e) => handleChange("author", e.target.value)} placeholder="이름" />
             </label>
             <label>
-              <span>지난 주 시작일</span>
+              <span>이번 주 시작일</span>
               <input type="date" value={localData.thisWeekDate} onChange={(e) => handleChange("thisWeekDate", e.target.value)} />
             </label>
-            <label>
-              <span>이번 주 시작일</span>
-              <input type="date" value={localData.nextWeekDate} disabled />
-            </label>
+          </div>
+          <div className="week-range-hint" style={{ fontSize: 11.5, color: "#56657a", margin: "-2px 2px 10px" }}>
+            {weekRangeHint(localData.thisWeekDate)}
           </div>
 
           <div className="worksheet-grid">
