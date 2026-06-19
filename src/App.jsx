@@ -422,7 +422,9 @@ function EntryEditor({ entry, isCurrent, isNew, isExpanded, onToggle, onSave, on
   );
 }
 
-function JournalView({ loading, searchQuery, setSearchQuery, authorFilter, setAuthorFilter, authors, filteredEntries, newEntry, onNewEntry, onCancelNew, onSave, onDelete, onRefresh, onNotice }) {
+function JournalView({ loading, searchQuery, setSearchQuery, authorFilter, setAuthorFilter, authors, filteredEntries, newEntry, onNewEntry, onCancelNew, onSave, onDelete, onRefresh, onNotice, availableDrafts = [], onLoadDraft, draftsError = false }) {
+  // authorFilter 적용한 초안만(전체면 전부, 작성자별 라벨로 구분 표시)
+  const shownDrafts = availableDrafts.filter((d) => authorFilter === "전체" || d.author === authorFilter);
   const [expandedIds, setExpandedIds] = useState(() => new Set());
   const [hasManualFold, setHasManualFold] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -496,6 +498,35 @@ function JournalView({ loading, searchQuery, setSearchQuery, authorFilter, setAu
         <div className="empty-state panel">
           <Loader2 size={18} className="spin" />
           <p>업무일지를 불러오는 중입니다.</p>
+        </div>
+      )}
+
+      {shownDrafts.length > 0 && (
+        <div className="panel" style={{ borderLeft: "3px solid #0b7cc1", marginBottom: 12, padding: "11px 14px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", marginBottom: 9 }}>
+            <span style={{ fontSize: 15 }} aria-hidden>🤖</span>
+            <strong style={{ fontSize: 13, color: "#1f3a5f" }}>Project Desk AI 초안 {shownDrafts.length}건</strong>
+            <span style={{ fontSize: 11.5, color: "#56657a" }}>— 진행상황 기반 초안입니다. 불러와 검토·보완 후 저장하세요.</span>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {shownDrafts.map((d) => (
+              <button
+                key={d.id}
+                className="btn btn-ghost"
+                style={{ fontSize: 12 }}
+                onClick={() => onLoadDraft?.(d)}
+                disabled={newEntry !== null}
+                title={`${d.author} ${getWeekInfo(d.thisWeekDate)} 초안 불러오기`}
+              >
+                <Plus size={13} /> {d.author} · {getWeekInfo(d.thisWeekDate)} · {d.itemCount}건
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {draftsError && (
+        <div className="result-line" style={{ color: "#8a94a6", fontSize: 11.5 }}>
+          AI 초안을 불러오지 못했습니다 (주간업무 기능에는 영향 없습니다).
         </div>
       )}
 
@@ -1537,6 +1568,64 @@ function Workspace({ session }) {
     });
   }
 
+  // ── Project Desk AI 초안(journal_drafts) 소비 — READ 전용. fetch 실패는 non-blocking(기존 주간탭 무영향). ──
+  const [drafts, setDrafts] = useState([]);
+  const [draftsError, setDraftsError] = useState(false);
+  const fetchDrafts = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from("journal_drafts")
+        .select("*")
+        .eq("status", "draft")          // 사용 가능 상태(draft)만 노출
+        .order("this_week_date", { ascending: false });
+      if (error) throw error;
+      setDrafts((data || []).map((d) => ({
+        id: d.id,
+        author: (d.author || "").trim(),
+        weekLabel: d.week_label || "",
+        thisWeekDate: d.this_week_date,
+        nextWeekDate: d.next_week_date,
+        thisWeekTasks: d.this_week_tasks || "",
+        itemCount: d.item_count || 0,
+      })));
+      setDraftsError(false);
+    } catch {
+      setDrafts([]); setDraftsError(true);   // 비차단: 기존 기능 영향 0
+    }
+  }, []);
+  useEffect(() => { fetchDrafts(); }, [fetchDrafts]);
+
+  // 같은 (작성자,주)에 사람 작성 행이 이미 있으면 초안 숨김(자동병합 금지).
+  // 정규화: author trim, 날짜는 YYYY-MM-DD 문자열 그대로 비교(Date/타임존 변환 금지).
+  const availableDrafts = useMemo(() => {
+    const have = new Set(entries.map((e) => `${(e.author || "").trim()}|${e.thisWeekDate}`));
+    return drafts.filter((d) => !have.has(`${d.author}|${d.thisWeekDate}`));
+  }, [drafts, entries]);
+
+  function handleNewEntryFromDraft(draft) {
+    // 불러오기 직전 재확인(두 탭/동시작성 가드) — 이미 있으면 건너뜀(덮어쓰기 방지)
+    const exists = entries.some(
+      (e) => (e.author || "").trim() === draft.author && e.thisWeekDate === draft.thisWeekDate,
+    );
+    if (exists) {
+      showNotice(`${draft.author} ${getWeekInfo(draft.thisWeekDate)} 주간보고가 이미 있어 초안 불러오기를 건너뜁니다.`, "info");
+      fetchEntries();
+      return;
+    }
+    // prefill: journal_entries 7필드만(draft 전용필드 제외 — insert에 엉뚱한 컬럼 방지)
+    setNewEntry({
+      id: "NEW",
+      author: draft.author,
+      weekLabel: `${getWeekInfo(draft.thisWeekDate)}(${draft.author})`,
+      thisWeekDate: draft.thisWeekDate,
+      nextWeekDate: draft.nextWeekDate || getNextMonday(draft.thisWeekDate),
+      thisWeekTasks: draft.thisWeekTasks,
+      nextWeekTasks: "",
+      notes: "",
+    });
+    showNotice(`${draft.author}님의 AI 초안을 불러왔습니다. 검토·보완 후 저장하세요.`, "success");
+  }
+
   const stats = useMemo(() => {
     const authorStats = {};
     entries.forEach((entry) => {
@@ -1617,6 +1706,9 @@ function Workspace({ session }) {
               onDelete={requestDelete}
               onRefresh={fetchEntries}
               onNotice={showNotice}
+              availableDrafts={availableDrafts}
+              onLoadDraft={handleNewEntryFromDraft}
+              draftsError={draftsError}
             />
           )}
           {view === "leave" && (
