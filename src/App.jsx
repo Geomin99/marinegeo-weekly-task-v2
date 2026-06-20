@@ -59,12 +59,15 @@ const AVATAR_COLORS = [
   { bg: "#e9eef6", text: "#31445f" },
 ];
 
+// MG Knowledge Finder feature flag — 기본 OFF. Vercel 환경변수 VITE_KB_SEARCH=1 로 활성화.
+const KB_SEARCH_ENABLED = import.meta.env.VITE_KB_SEARCH === "1";
+
 const NAV_ITEMS = [
   { id: "dashboard", label: "대시보드", icon: LayoutDashboard },
   { id: "journal", label: "주간업무", icon: FileText },
   { id: "leave", label: "캘린더", icon: CalendarDays },
   { id: "center", label: "해양벤처진흥센터", icon: BriefcaseBusiness },
-  { id: "kbsearch", label: "자료검색", icon: Search },
+  ...(KB_SEARCH_ENABLED ? [{ id: "kbsearch", label: "자료검색", icon: Search }] : []),
 ];
 
 function formatYMD(date) {
@@ -1755,7 +1758,7 @@ function Workspace({ session }) {
           {view === "staffnotes" && (
             <StaffNotesView session={session} viewer={viewer} onNotice={showNotice} />
           )}
-          {view === "kbsearch" && (
+          {view === "kbsearch" && KB_SEARCH_ENABLED && (
             <section className="module-frame">
               <KBSearchView onNotice={showNotice} />
             </section>
