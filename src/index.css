@@ -1018,6 +1018,11 @@ button:disabled {
   color: #45556c;
   background: #eef2f7;
 }
+/* KBSearchView 품질배지 — badge.orange (WCAG AA: #9a3412 on #ffedd5 ≥ 4.5:1) */
+.badge.orange {
+  color: #9a3412;
+  background: #ffedd5;
+}
 
 .center-counters {
   display: flex;
