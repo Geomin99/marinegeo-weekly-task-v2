@@ -37,6 +37,7 @@ import StaffNotesView from "./StaffNotesView.jsx";
 import { StaffNoteButton } from "./QuickStaffNote.jsx";
 import { emailForName } from "./staffNotes";
 import { ErpHero } from "./ErpHero.jsx";
+import KBSearchView from "./KBSearchView.jsx";
 
 const BRAND = {
   navy: "#1f3a5f",
@@ -63,6 +64,7 @@ const NAV_ITEMS = [
   { id: "journal", label: "주간업무", icon: FileText },
   { id: "leave", label: "캘린더", icon: CalendarDays },
   { id: "center", label: "해양벤처진흥센터", icon: BriefcaseBusiness },
+  { id: "kbsearch", label: "자료검색", icon: Search },
 ];
 
 function formatYMD(date) {
@@ -1255,6 +1257,7 @@ function LoginScreen() {
 }
 
 const VALID_VIEWS = [...NAV_ITEMS.map((n) => n.id), "inbox", "voice", "meeting", "staffnotes"];
+// Note: "kbsearch" is already included via NAV_ITEMS.map above.
 function viewFromHash() {
   const h = (window.location.hash || "").replace(/^#\/?/, "");
   return VALID_VIEWS.includes(h) ? h : "dashboard";
@@ -1751,6 +1754,11 @@ function Workspace({ session }) {
           )}
           {view === "staffnotes" && (
             <StaffNotesView session={session} viewer={viewer} onNotice={showNotice} />
+          )}
+          {view === "kbsearch" && (
+            <section className="module-frame">
+              <KBSearchView onNotice={showNotice} />
+            </section>
           )}
         </main>
       </div>
