@@ -441,7 +441,7 @@ export default function KBSearchView({ onNotice }) {
   const isOverLimit = queryLen > MAX_QUERY_LENGTH;
 
   return (
-    <div className="kb-search-view" style={{ maxWidth: 860, margin: "0 auto" }}>
+    <div className="kb-search-view" style={{ width: "100%" }}>
       {/* ── 히어로 ── */}
       <ErpHero
         title="자료 검색"
