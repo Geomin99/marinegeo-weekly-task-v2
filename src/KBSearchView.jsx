@@ -197,6 +197,15 @@ function ResultCard({ result, index, onCopyPath, onNotice }) {
   // P0 #13: 카드에는 축약 경로만 표시. 전체 UNC는 복사 버튼으로만.
   const abbreviatedPath = abbreviateUncPath(result.unc_path);
 
+  // 2순위: "왜 매칭됐는지" 배지 (서버 annotateMatches 결과). 색상만으로 의미 전달 금지 → 텍스트 라벨.
+  const matchBadgeStyle = (m) => {
+    const base = { borderRadius: 4, padding: "1px 7px", fontSize: 11, fontWeight: 600, flexShrink: 0 };
+    if (m === "요약") return { ...base, background: "#e8f2ff", color: "#1f3a5f" };
+    if (m === "파일명") return { ...base, background: "#e3f4ee", color: "#0f7a52" };
+    if (m === "경로") return { ...base, background: "#f3f0e8", color: "#8a6d3b" };
+    return { ...base, background: "#eef0f7", color: "#4b5563" }; // 본문·의미
+  };
+
   async function handleCopy() {
     const ok = await copyToClipboard(result.unc_path);
     if (ok) {
@@ -241,6 +250,21 @@ function ResultCard({ result, index, onCopyPath, onNotice }) {
           {qb.label}
         </span>
       </div>
+
+      {/* 2순위: 매칭 이유 배지 (요약/파일명/경로/본문·의미) + 매칭 검색어 */}
+      {Array.isArray(result.matched_in) && result.matched_in.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 7 }}>
+          <span style={{ fontSize: 11, color: "#56657a" }}>매칭</span>
+          {result.matched_in.map((m) => (
+            <span key={m} style={matchBadgeStyle(m)} aria-label={`매칭 위치: ${m}`}>{m}</span>
+          ))}
+          {Array.isArray(result.matched_terms) && result.matched_terms.length > 0 && (
+            <span style={{ fontSize: 11, color: "#56657a", wordBreak: "break-all" }}>
+              · 검색어: {result.matched_terms.slice(0, 6).join(", ")}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* 폴더 루트 */}
       {result.folder_root && (
