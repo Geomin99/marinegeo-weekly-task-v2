@@ -275,14 +275,30 @@ function ResultCard({ result, index, onCopyPath, onNotice }) {
         }}>
           {abbreviatedPath}
         </code>
+        <a
+          className="btn btn-primary"
+          style={{ flexShrink: 0, padding: "3px 10px", fontSize: 12, textDecoration: "none", whiteSpace: "nowrap" }}
+          href={`mgeo:open?p=${encodeURIComponent(result.unc_path)}`}
+          title="기본 프로그램으로 파일 열기"
+        >
+          파일 열기
+        </a>
+        <a
+          className="btn btn-ghost"
+          style={{ flexShrink: 0, padding: "3px 10px", fontSize: 12, textDecoration: "none", whiteSpace: "nowrap" }}
+          href={`mgeo:folder?p=${encodeURIComponent(result.unc_path)}`}
+          title="탐색기에서 폴더 열기(파일 선택)"
+        >
+          폴더 열기
+        </a>
         <button
           className="btn btn-ghost"
           style={{ flexShrink: 0, padding: "3px 8px", fontSize: 12 }}
           onClick={handleCopy}
           aria-label={`${result.filename} 경로 복사`}
+          title="경로 복사"
         >
-          <Copy size={13} style={{ marginRight: 4 }} />
-          경로 복사
+          <Copy size={13} />
         </button>
       </div>
 
