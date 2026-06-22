@@ -422,7 +422,7 @@ function FileLocationSection({ query, onNotice }) {
   }
 
   return (
-    <section style={{ marginTop: 22 }}>
+    <section className="panel" style={{ marginBottom: 20, padding: "14px 18px", background: "#f7faff", border: "1px solid #d9e3ee", borderRadius: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
         <FolderOpen size={16} style={{ color: "#1f3a5f" }} />
         <h3 style={{ margin: 0, fontSize: 15, color: "#142033" }}>파일 위치</h3>
@@ -748,6 +748,11 @@ export default function KBSearchView({ onNotice }) {
         total 건수 미표시. pagination/더보기 제거 (fixed cap).
         상위 관련 결과 안내문구 표시.
       */}
+      {/* ── 파일 위치 섹션 (find-UX 흡수) — 맨 위 배치(토뭉이님 지시), 문서 결과와 독립 동작·장애 분리 ── */}
+      {submitted && FINDUX_ENABLED && !isKilled && (
+        <FileLocationSection query={submitted} onNotice={onNotice} />
+      )}
+
       <div aria-live="polite" aria-atomic="false">
         {/* ── 문서 내용 섹션 헤더 (find-UX 통합 시 파일 위치와 구분) ── */}
         {isDone && FINDUX_ENABLED && (
@@ -808,11 +813,6 @@ export default function KBSearchView({ onNotice }) {
           </div>
         )}
       </div>
-
-      {/* ── 파일 위치 섹션 (find-UX 흡수) — 문서 결과와 별개로 동작·장애 분리 ── */}
-      {submitted && FINDUX_ENABLED && !isKilled && (
-        <FileLocationSection query={submitted} onNotice={onNotice} />
-      )}
 
       {/* ── 초기 상태 안내 ── */}
       {status === "idle" && (
