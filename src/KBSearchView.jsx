@@ -43,17 +43,31 @@
 // ⚠️ 배포는 토뭉이님 명시 승인 후 별도 진행 (Edge Function kb-search 선배포 필요).
 // =============================================================================
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
   Copy,
   FileText,
+  FolderOpen,
   Loader2,
+  MapPin,
   Search,
   X,
 } from "lucide-react";
 import { kbSearch } from "./kbSearchApi";
+import { resolverFindNames, resolverResolve, RESOLVER_URL, FINDUX_ENABLED } from "./findFilesApi";
 import { ErpHero } from "./ErpHero";
+
+// 파일 위치 섹션 — 카탈로그 종류/연도(catalog_ingest 분류 정합)
+const FILE_FORMATS = ["SEGY", "DOC", "NAV", "GIS", "OTHER"];
+const FILE_YEARS = ["2021", "2022", "2023", "2024", "2025", "2026"];
+function fileChipStyle(active) {
+  return {
+    padding: "2px 9px", borderRadius: 13, fontSize: 11.5, cursor: "pointer", marginRight: 5, marginBottom: 5,
+    border: "1px solid " + (active ? "#245f9a" : "#d9e3ee"),
+    background: active ? "#245f9a" : "#fff", color: active ? "#fff" : "#56657a",
+  };
+}
 
 // ---------------------------------------------------------------------------
 // 상수 / 설정
@@ -363,6 +377,126 @@ function EmptyState({ icon: Icon, heading, sub }) {
 }
 
 // ---------------------------------------------------------------------------
+// 서브 컴포넌트: 파일 위치 섹션 (find-UX 흡수 — 파일명·메타 매칭, 내용검색 아님)
+//   - 전역 파일명 검색(resolver /find_names, 캐시 기반). 클라우드엔 파일명 없음 → 사내망 resolver 전용.
+//   - 포테토뭉 P1: cap/too_many/q정책은 서버 강제. 실경로는 [위치 보기] 클릭 시에만 /resolve.
+//   - 장애 분리: resolver 미연결/불가 시 이 섹션만 안내, 문서 검색은 영향 없음.
+// ---------------------------------------------------------------------------
+function FileLocationSection({ query, onNotice }) {
+  const [formats, setFormats] = useState([]);
+  const [years, setYears]     = useState([]);
+  const [state, setState]     = useState("idle"); // idle|loading|done|error|unavailable
+  const [matches, setMatches] = useState([]);
+  const [truncated, setTruncated] = useState(false);
+  const [paths, setPaths]     = useState({});      // token -> realpath(UNC)
+  const reqRef = useRef(null);
+
+  const toggle = (arr, set, v) => set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
+
+  const run = useCallback(async () => {
+    const q = (query || "").trim();
+    if (!q || !RESOLVER_URL) { setState(RESOLVER_URL ? "idle" : "unavailable"); return; }
+    const my = {}; reqRef.current = my;
+    setState("loading"); setPaths({});
+    const r = await resolverFindNames({
+      q,
+      years: years.length ? years : null,
+      formats: formats.length ? formats : null,
+    });
+    if (reqRef.current !== my) return;
+    if (!r.ok) {
+      setMatches([]);
+      setState(r.code === "resolver_unconfigured" || r.code === "resolver_unreachable" ? "unavailable" : "error");
+      return;
+    }
+    setMatches(r.matches); setTruncated(r.truncated); setState("done");
+  }, [query, years, formats]);
+
+  // 질의·필터 변경 시 자동 재검색
+  useEffect(() => { run(); }, [query, years, formats]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function showPath(token) {
+    const r = await resolverResolve({ tokens: [token] });
+    if (!r.ok || !r.results?.[token]) { onNotice?.("위치를 확인하지 못했습니다.", "error"); return; }
+    setPaths((p) => ({ ...p, [token]: r.results[token] }));
+  }
+
+  return (
+    <section style={{ marginTop: 22 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+        <FolderOpen size={16} style={{ color: "#1f3a5f" }} />
+        <h3 style={{ margin: 0, fontSize: 15, color: "#142033" }}>파일 위치</h3>
+        <span style={{ fontSize: 11, color: "#8a6d3b", background: "#f3f0e8", borderRadius: 4, padding: "1px 7px" }}>
+          파일명·메타 매칭 · 내용 검색 아님
+        </span>
+      </div>
+      <p style={{ margin: "0 0 8px", fontSize: 12, color: "#56657a" }}>
+        Y 드라이브 전체 파일을 파일명으로 찾습니다(원본·도면·SEG-Y 포함). 결과가 많으면 연도·종류로 좁히세요.
+      </p>
+
+      {/* 선택적 좁히기 */}
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
+        <span style={{ fontSize: 11, color: "#56657a", marginRight: 6 }}>연도</span>
+        {FILE_YEARS.map((y) => (
+          <span key={y} style={fileChipStyle(years.includes(y))} onClick={() => toggle(years, setYears, y)}>{y}</span>
+        ))}
+        <span style={{ fontSize: 11, color: "#56657a", margin: "0 6px 0 10px" }}>종류</span>
+        {FILE_FORMATS.map((f) => (
+          <span key={f} style={fileChipStyle(formats.includes(f))} onClick={() => toggle(formats, setFormats, f)}>{f}</span>
+        ))}
+      </div>
+
+      {state === "loading" && (
+        <div style={{ fontSize: 12.5, color: "#56657a", display: "flex", alignItems: "center", gap: 6 }}>
+          <Loader2 size={14} className="spin" /> 파일 위치 검색 중…
+        </div>
+      )}
+      {state === "unavailable" && (
+        <div style={{ fontSize: 12.5, color: "#8a6d3b", background: "#fcf8ee", border: "1px solid #ecdcc0", borderRadius: 6, padding: "8px 11px" }}>
+          파일 위치 검색은 사내망에서만 가능합니다. (문서 내용 검색은 정상입니다.)
+        </div>
+      )}
+      {state === "error" && (
+        <div style={{ fontSize: 12.5, color: "#a33" }}>파일 위치를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</div>
+      )}
+      {state === "done" && matches.length === 0 && (
+        <div style={{ fontSize: 12.5, color: "#56657a" }}>해당 파일을 찾지 못했습니다.</div>
+      )}
+
+      {state === "done" && truncated && (
+        <div style={{ fontSize: 11.5, color: "#8a6d3b", marginBottom: 6 }}>
+          결과가 많아 일부만 표시합니다. 연도·종류로 좁히면 더 정확합니다.
+        </div>
+      )}
+
+      {state === "done" && matches.map((m) => (
+        <div key={m.locator_token} className="panel" style={{ marginBottom: 8, padding: "10px 14px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: "#142033", flex: 1, wordBreak: "break-all" }}>{m.display_name}</span>
+            {m.format_class && <span style={{ fontSize: 11, background: "#e8f2ff", color: "#1f3a5f", borderRadius: 4, padding: "1px 7px" }}>{m.format_class}</span>}
+            {m.year && <span style={{ fontSize: 11, background: "#eef0f7", color: "#4b5563", borderRadius: 4, padding: "1px 7px" }}>{m.year}</span>}
+          </div>
+          {paths[m.locator_token] ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 7, background: "#f4f7fb", border: "1px solid #d9e3ee", borderRadius: 6, padding: "6px 10px" }}>
+              <code style={{ flex: 1, fontSize: 12, color: "#245f9a", wordBreak: "break-all" }}>{abbreviateUncPath(paths[m.locator_token])}</code>
+              <a className="btn btn-primary" style={{ padding: "3px 10px", fontSize: 12, textDecoration: "none", whiteSpace: "nowrap" }}
+                 href={`mgeo:open?p=${encodeURIComponent(paths[m.locator_token])}`} title="기본 프로그램으로 파일 열기">파일 열기</a>
+              <a className="btn btn-ghost" style={{ padding: "3px 10px", fontSize: 12, textDecoration: "none", whiteSpace: "nowrap" }}
+                 href={`mgeo:folder?p=${encodeURIComponent(paths[m.locator_token])}`} title="탐색기에서 폴더 열기">폴더 열기</a>
+            </div>
+          ) : (
+            <button className="btn btn-ghost" style={{ marginTop: 7, padding: "3px 10px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 5 }}
+                    onClick={() => showPath(m.locator_token)}>
+              <MapPin size={13} /> 위치 보기
+            </button>
+          )}
+        </div>
+      ))}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // 메인 컴포넌트: KBSearchView
 // ---------------------------------------------------------------------------
 
@@ -615,6 +749,16 @@ export default function KBSearchView({ onNotice }) {
         상위 관련 결과 안내문구 표시.
       */}
       <div aria-live="polite" aria-atomic="false">
+        {/* ── 문서 내용 섹션 헤더 (find-UX 통합 시 파일 위치와 구분) ── */}
+        {isDone && FINDUX_ENABLED && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+            <FileText size={16} style={{ color: "#1f3a5f" }} />
+            <h3 style={{ margin: 0, fontSize: 15, color: "#142033" }}>문서 내용</h3>
+            <span style={{ fontSize: 11, color: "#1f3a5f", background: "#e8f2ff", borderRadius: 4, padding: "1px 7px" }}>
+              본문·요약·의미 검색
+            </span>
+          </div>
+        )}
         {/* ── 결과 헤더 (건수 미표시) ── */}
         {hasResults && (
           <p style={{
@@ -634,8 +778,8 @@ export default function KBSearchView({ onNotice }) {
         {isEmpty && (
           <EmptyState
             icon={FileText}
-            heading="검색 결과 없음"
-            sub="검색어를 바꿔 다시 시도해 주세요."
+            heading={FINDUX_ENABLED ? "문서 내용 결과 없음" : "검색 결과 없음"}
+            sub={FINDUX_ENABLED ? "다른 검색어로 시도하거나, 아래 ‘파일 위치’에서 파일명으로 찾아보세요." : "검색어를 바꿔 다시 시도해 주세요."}
           />
         )}
 
@@ -664,6 +808,11 @@ export default function KBSearchView({ onNotice }) {
           </div>
         )}
       </div>
+
+      {/* ── 파일 위치 섹션 (find-UX 흡수) — 문서 결과와 별개로 동작·장애 분리 ── */}
+      {submitted && FINDUX_ENABLED && !isKilled && (
+        <FileLocationSection query={submitted} onNotice={onNotice} />
+      )}
 
       {/* ── 초기 상태 안내 ── */}
       {status === "idle" && (

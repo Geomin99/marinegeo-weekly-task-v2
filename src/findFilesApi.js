@@ -60,6 +60,26 @@ export async function resolverSearch({ tokens, q, matchMode = "basename", limit 
   }
 }
 
+// resolver /find_names — 전역 파일명 검색(필터 선택적, 캐시 기반). 자료검색 "파일 위치" 섹션용.
+// 포테토뭉 P1: 파일명=민감 → cap(viewer 50/operator 200)·too_many·q정책은 서버가 강제.
+export async function resolverFindNames({ q, years = null, formats = null, limit = 50 }) {
+  if (!RESOLVER_URL) return { ok: false, code: "resolver_unconfigured", detail: "파일 위치 서비스 미연결(사내망 필요)." };
+  const t = await token();
+  if (!t) return { ok: false, code: "unauthorized", detail: "로그인이 필요합니다." };
+  try {
+    const r = await fetch(`${RESOLVER_URL}/find_names`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${t}` },
+      body: JSON.stringify({ q, years, formats, limit, purpose: "kbsearch_filefind" }),
+    });
+    const b = await r.json();
+    if (!r.ok) return { ok: false, code: b.error || `http_${r.status}`, detail: b.detail };
+    return { ok: true, matches: b.matches || [], scanned: b.scanned, truncated: !!b.truncated, tooMany: !!b.too_many };
+  } catch (e) {
+    return { ok: false, code: "resolver_unreachable", detail: "파일 위치 서비스 연결 불가(사내망 필요)." };
+  }
+}
+
 // resolver /resolve_batch — 선택 토큰의 실경로(소량). 클릭 시 호출, 감사로그 남음.
 export async function resolverResolve({ tokens }) {
   if (!RESOLVER_URL) return { ok: false, code: "resolver_unconfigured" };
