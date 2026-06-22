@@ -58,8 +58,8 @@ import { kbSearch } from "./kbSearchApi";
 import { resolverFindNames, resolverResolve, RESOLVER_URL, FINDUX_ENABLED } from "./findFilesApi";
 import { ErpHero } from "./ErpHero";
 
-// 파일 위치 섹션 — 카탈로그 종류/연도(catalog_ingest 분류 정합)
-const FILE_FORMATS = ["SEGY", "DOC", "NAV", "GIS", "OTHER"];
+// 파일 위치 섹션 — 종류(문서/그림)·연도(파일명/경로 20xx)
+const FILE_FORMATS = [["DOC", "문서"], ["IMG", "그림"]];
 const FILE_YEARS = ["2021", "2022", "2023", "2024", "2025", "2026"];
 function fileChipStyle(active) {
   return {
@@ -431,7 +431,7 @@ function FileLocationSection({ query, onNotice }) {
         </span>
       </div>
       <p style={{ margin: "0 0 8px", fontSize: 12, color: "#56657a" }}>
-        파일명에 든 단어로 찾습니다(여러 단어는 모두 포함). 원본·도면·SEG-Y 포함 · 연도·종류로 더 좁힐 수 있습니다.
+        파일명에 든 단어로 찾습니다(여러 단어는 모두 포함). 보고서·참고자료·도면 등 문서·그림 · 연도·종류로 더 좁힐 수 있습니다.
       </p>
 
       {/* 선택적 좁히기 */}
@@ -441,8 +441,8 @@ function FileLocationSection({ query, onNotice }) {
           <span key={y} style={fileChipStyle(years.includes(y))} onClick={() => toggle(years, setYears, y)}>{y}</span>
         ))}
         <span style={{ fontSize: 11, color: "#56657a", margin: "0 6px 0 10px" }}>종류</span>
-        {FILE_FORMATS.map((f) => (
-          <span key={f} style={fileChipStyle(formats.includes(f))} onClick={() => toggle(formats, setFormats, f)}>{f}</span>
+        {FILE_FORMATS.map(([f, label]) => (
+          <span key={f} style={fileChipStyle(formats.includes(f))} onClick={() => toggle(formats, setFormats, f)}>{label}</span>
         ))}
       </div>
 
