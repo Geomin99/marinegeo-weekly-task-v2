@@ -431,7 +431,7 @@ function FileLocationSection({ query, onNotice }) {
         </span>
       </div>
       <p style={{ margin: "0 0 8px", fontSize: 12, color: "#56657a" }}>
-        Y 드라이브 전체 파일을 파일명으로 찾습니다(원본·도면·SEG-Y 포함). 결과가 많으면 연도·종류로 좁히세요.
+        파일명에 든 단어로 찾습니다(여러 단어는 모두 포함). 원본·도면·SEG-Y 포함 · 연도·종류로 더 좁힐 수 있습니다.
       </p>
 
       {/* 선택적 좁히기 */}
@@ -460,7 +460,9 @@ function FileLocationSection({ query, onNotice }) {
         <div style={{ fontSize: 12.5, color: "#a33" }}>파일 위치를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</div>
       )}
       {state === "done" && matches.length === 0 && (
-        <div style={{ fontSize: 12.5, color: "#56657a" }}>해당 파일을 찾지 못했습니다.</div>
+        <div style={{ fontSize: 12.5, color: "#56657a" }}>
+          이 검색어가 든 파일명이 없습니다. 파일명 일부만 입력해 보세요 (예: <b>line</b>, <b>petrel</b>, <b>L001</b>).
+        </div>
       )}
 
       {state === "done" && truncated && (
