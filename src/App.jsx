@@ -38,6 +38,7 @@ import { StaffNoteButton } from "./QuickStaffNote.jsx";
 import { emailForName } from "./staffNotes";
 import { ErpHero } from "./ErpHero.jsx";
 import KBSearchView from "./KBSearchView.jsx";
+import FindFilesView from "./FindFilesView.jsx";
 
 const BRAND = {
   navy: "#1f3a5f",
@@ -61,6 +62,8 @@ const AVATAR_COLORS = [
 
 // MG Knowledge Finder feature flag — 기본 OFF. Vercel 환경변수 VITE_KB_SEARCH=1 로 활성화.
 const KB_SEARCH_ENABLED = import.meta.env.VITE_KB_SEARCH === "1";
+// find-UX(파일 위치 찾기) feature flag — 기본 OFF. VITE_FINDUX_ENABLED=1 + VITE_RESOLVER_URL 설정 시 활성화.
+const FINDUX_ENABLED = import.meta.env.VITE_FINDUX_ENABLED === "1";
 
 const NAV_ITEMS = [
   { id: "dashboard", label: "대시보드", icon: LayoutDashboard },
@@ -68,6 +71,7 @@ const NAV_ITEMS = [
   { id: "leave", label: "캘린더", icon: CalendarDays },
   { id: "center", label: "해양벤처진흥센터", icon: BriefcaseBusiness },
   ...(KB_SEARCH_ENABLED ? [{ id: "kbsearch", label: "자료검색", icon: Search }] : []),
+  ...(FINDUX_ENABLED ? [{ id: "findux", label: "파일 위치 찾기", icon: Search }] : []),
 ];
 
 function formatYMD(date) {
@@ -1761,6 +1765,11 @@ function Workspace({ session }) {
           {view === "kbsearch" && KB_SEARCH_ENABLED && (
             <section className="module-frame">
               <KBSearchView onNotice={showNotice} />
+            </section>
+          )}
+          {view === "findux" && FINDUX_ENABLED && (
+            <section className="module-frame">
+              <FindFilesView />
             </section>
           )}
         </main>
