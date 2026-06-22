@@ -61,6 +61,17 @@ import { ErpHero } from "./ErpHero";
 // 파일 위치 섹션 — 종류(문서/그림)·연도(파일명/경로 20xx)
 const FILE_FORMATS = [["DOC", "문서"], ["IMG", "그림"]];
 const FILE_YEARS = ["2021", "2022", "2023", "2024", "2025", "2026"];
+// 결과 배지: 확장자 기준 실제 파일 형식
+const FILE_TYPE_LABEL = {
+  pdf: "PDF", docx: "DOC", doc: "DOC", pptx: "PPT", ppt: "PPT",
+  xlsx: "XLS", xls: "XLS", hwp: "HWP", hwpx: "HWP",
+  png: "PNG", jpg: "JPG", jpeg: "JPG", gif: "GIF", bmp: "BMP",
+  tif: "TIF", tiff: "TIF", svg: "SVG", webp: "WEBP",
+};
+function fileTypeLabel(name) {
+  const ext = (name.includes(".") ? name.split(".").pop() : "").toLowerCase();
+  return FILE_TYPE_LABEL[ext] || (ext ? ext.toUpperCase() : "FILE");
+}
 function fileChipStyle(active) {
   return {
     padding: "2px 9px", borderRadius: 13, fontSize: 11.5, cursor: "pointer", marginRight: 5, marginBottom: 5,
@@ -475,7 +486,7 @@ function FileLocationSection({ query, onNotice }) {
         <div key={m.locator_token} className="panel" style={{ marginBottom: 8, padding: "10px 14px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <span style={{ fontSize: 14, fontWeight: 700, color: "#142033", flex: 1, wordBreak: "break-all" }}>{m.display_name}</span>
-            {m.format_class && <span style={{ fontSize: 11, background: "#e8f2ff", color: "#1f3a5f", borderRadius: 4, padding: "1px 7px" }}>{m.format_class}</span>}
+            <span style={{ fontSize: 11, background: "#e8f2ff", color: "#1f3a5f", borderRadius: 4, padding: "1px 7px", fontWeight: 700 }}>{fileTypeLabel(m.display_name)}</span>
             {m.year && <span style={{ fontSize: 11, background: "#eef0f7", color: "#4b5563", borderRadius: 4, padding: "1px 7px" }}>{m.year}</span>}
           </div>
           {paths[m.locator_token] ? (
