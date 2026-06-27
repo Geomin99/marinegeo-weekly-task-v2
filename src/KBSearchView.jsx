@@ -52,6 +52,7 @@ import {
   Loader2,
   MapPin,
   Search,
+  ShieldCheck,
   X,
 } from "lucide-react";
 import { kbSearch } from "./kbSearchApi";
@@ -388,6 +389,108 @@ function EmptyState({ icon: Icon, heading, sub }) {
 }
 
 // ---------------------------------------------------------------------------
+// 서브 컴포넌트: 관련 회사 기준 박스 (LLM Wiki 검증등급 표준카드 오버레이)
+//   - 권위 분리(A=회사표준 지식 / B=실제 파일). "참고 신호"까지만 — 실제 파일·해석결과 아님.
+//   - 표시 전용: card_id 비노출, 한글 title만, 클릭 불가. degraded/빈배열/flag OFF → 미렌더.
+//   - flag OFF면 서버가 reviewed_cards 키를 안 보냄 → 빈배열 → 아무것도 안 그림(회귀 0).
+// ---------------------------------------------------------------------------
+const REVIEWED_GRADE_BADGE = {
+  // 회사 표준(approved-standard): 녹 계열 / 검토 참고(human-reviewed): 회사 blue 계열.
+  "approved-standard": { label: "회사 표준", bg: "#d1fae5", fg: "#065f46", desc: "회사 표준으로 승인된 기준" },
+  "human-reviewed":    { label: "검토 참고", bg: "#e1effb", fg: "#0b5a8a", desc: "사람이 검토한 참고 기준(최종 반영 전 확인)" },
+};
+
+function ReviewedCardsBox({ cards, degraded }) {
+  const [helpOpen, setHelpOpen] = useState(false);
+  // Q5: degraded·빈배열·flag OFF(키 없음→빈배열) → 완전 미렌더. "표준 없음" 류 문구도 금지.
+  if (degraded || !Array.isArray(cards) || cards.length === 0) return null;
+
+  // authority_level 높은 순(회사 표준 > 검토 참고). 서버가 이미 정렬하나 안전하게 재정렬. 최대 2개.
+  const sorted = [...cards]
+    .filter((c) => c && (c.grade === "approved-standard" || c.grade === "human-reviewed"))
+    .sort((a, b) => (b.authority_level ?? 0) - (a.authority_level ?? 0))
+    .slice(0, 2);
+  if (sorted.length === 0) return null;
+
+  return (
+    <section
+      aria-live="polite"
+      aria-label="관련 회사 기준 지식"
+      className="panel"
+      style={{
+        margin: "0 0 14px", padding: "12px 14px",
+        background: "#f7faff", border: "1px solid #d9e3ee",
+        borderLeft: "3px solid #245f9a", borderRadius: 8,
+      }}
+    >
+      {/* 헤더: 제목 + 무엇인지 도움말 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 2 }}>
+        <ShieldCheck size={15} style={{ color: "#245f9a", flexShrink: 0 }} aria-hidden="true" />
+        <h3 style={{ margin: 0, fontSize: 13.5, color: "#1f3a5f", fontWeight: 600 }}>관련 회사 기준</h3>
+        <button
+          type="button"
+          onClick={() => setHelpOpen((v) => !v)}
+          aria-expanded={helpOpen}
+          aria-label="관련 회사 기준이 무엇인지 설명 보기"
+          style={{
+            marginLeft: "auto", fontSize: 11, color: "#56657a",
+            background: "none", border: "none", cursor: "pointer",
+            padding: "2px 4px", textDecoration: "underline", textUnderlineOffset: 2,
+          }}
+        >
+          이게 뭔가요?
+        </button>
+      </div>
+
+      {/* 권위 분리 안내문구 (Q4: "실제 파일 아닌 회사 기준") — 필수 */}
+      <p style={{ margin: "0 0 8px", fontSize: 11.5, color: "#56657a", lineHeight: 1.5 }}>
+        실제 파일 검색 결과가 아닌, 이 주제와 관련된 회사 기준 지식입니다.
+      </p>
+
+      {helpOpen && (
+        <p style={{
+          margin: "0 0 8px", fontSize: 11.5, color: "#3d4a5c", lineHeight: 1.55,
+          background: "#eef4fb", borderRadius: 6, padding: "8px 10px",
+        }}>
+          회사 표준 지식(LLM Wiki)에서 이 검색어와 관련된 기준 항목을 찾아 알려드립니다.
+          실제 파일·도면·원자료가 아니며, 특정 보고서의 해석 결과도 아닙니다.
+          작업 시 회사 기준으로 참고하시되, 최종 판단은 담당자가 확인합니다.
+        </p>
+      )}
+
+      {/* 카드 목록 — 표시 전용(클릭 불가). 한글 title + 등급 배지. card_id 비노출. */}
+      <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+        {sorted.map((c, i) => {
+          const badge = REVIEWED_GRADE_BADGE[c.grade] || { label: "기준", bg: "#f3f4f6", fg: "#374151", desc: "회사 기준" };
+          const title = typeof c.title === "string" && c.title.trim() ? c.title : "(제목 없음)";
+          return (
+            <li
+              key={`${c.grade}:${i}`}
+              style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+            >
+              <span
+                className="badge"
+                style={{
+                  flexShrink: 0, fontSize: 11, fontWeight: 600,
+                  background: badge.bg, color: badge.fg,
+                  borderRadius: 4, padding: "2px 8px", whiteSpace: "nowrap",
+                }}
+                aria-label={`등급: ${badge.label} — ${badge.desc}`}
+              >
+                {badge.label}
+              </span>
+              <span style={{ fontSize: 13, color: "#142033", lineHeight: 1.45, wordBreak: "break-word" }}>
+                {title}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // 서브 컴포넌트: 파일 위치 섹션 (find-UX 흡수 — 파일명·메타 매칭, 내용검색 아님)
 //   - 전역 파일명 검색(resolver /find_names, 캐시 기반). 클라우드엔 파일명 없음 → 사내망 resolver 전용.
 //   - 포테토뭉 P1: cap/too_many/q정책은 서버 강제. 실경로는 [위치 보기] 클릭 시에만 /resolve.
@@ -534,6 +637,8 @@ export default function KBSearchView({ onNotice }) {
   const [results, setResults]         = useState([]);
   const [status, setStatus]           = useState("idle");
   const [errorCode, setErrorCode]     = useState(null);
+  const [reviewedCards, setReviewedCards]       = useState([]);    // LLM Wiki 표준카드 오버레이(flag-gated)
+  const [reviewedDegraded, setReviewedDegraded] = useState(false);
   const abortRef                      = useRef(null);
   const inputRef                      = useRef(null);
 
@@ -554,6 +659,8 @@ export default function KBSearchView({ onNotice }) {
     setSubmitted(trimmed);
     setResults([]);
     setErrorCode(null);
+    setReviewedCards([]);
+    setReviewedDegraded(false);
 
     // P0 #14: fixed cap — pagination 없음. 한 번에 PAGE_LIMIT 행만 요청.
     const response = await kbSearch({ query: trimmed, limit: PAGE_LIMIT, offset: 0 });
@@ -563,6 +670,9 @@ export default function KBSearchView({ onNotice }) {
 
     if (response.ok) {
       setResults(response.results);
+      // reviewed_cards 오버레이(flag OFF면 빈배열 → 박스 미렌더). card_id는 화면에 노출하지 않음.
+      setReviewedCards(Array.isArray(response.reviewed_cards) ? response.reviewed_cards : []);
+      setReviewedDegraded(response.reviewed_cards_degraded === true);
       setStatus("done");
     } else {
       setErrorCode(response.code);
@@ -588,6 +698,8 @@ export default function KBSearchView({ onNotice }) {
     setStatus("idle");
     setErrorCode(null);
     setSubmitted("");
+    setReviewedCards([]);
+    setReviewedDegraded(false);
     inputRef.current?.focus();
   }
 
@@ -764,6 +876,11 @@ export default function KBSearchView({ onNotice }) {
       {/* ── 파일 위치 섹션 (find-UX 흡수) — 맨 위 배치(토뭉이님 지시), 문서 결과와 독립 동작·장애 분리 ── */}
       {submitted && FINDUX_ENABLED && !isKilled && (
         <FileLocationSection query={submitted} onNotice={onNotice} />
+      )}
+
+      {/* ── 관련 회사 기준 박스 (Q2: 파일 위치 ↔ 문서 내용 사이) — flag OFF/빈/degraded면 미렌더 ── */}
+      {submitted && !isKilled && (
+        <ReviewedCardsBox cards={reviewedCards} degraded={reviewedDegraded} />
       )}
 
       <div aria-live="polite" aria-atomic="false">

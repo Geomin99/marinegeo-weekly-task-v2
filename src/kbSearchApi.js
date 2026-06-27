@@ -155,6 +155,10 @@ export async function kbSearch({ query, limit = 30, offset = 0 }) {
       ok:      true,
       results: body.results || [],
       total:   typeof body.total === "number" ? body.total : (body.results?.length ?? 0),
+      // reviewed_cards 오버레이(flag-gated). flag OFF면 서버가 키 자체를 안 보냄 →
+      // 빈배열로 정규화(undefined 미전파). 각 항목: {grade, grade_label, authority_level, title, ...}.
+      reviewed_cards:          Array.isArray(body.reviewed_cards) ? body.reviewed_cards : [],
+      reviewed_cards_degraded: body.reviewed_cards_degraded === true,
     };
   }
 
