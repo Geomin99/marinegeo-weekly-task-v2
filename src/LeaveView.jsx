@@ -149,6 +149,35 @@ function countHolidaysInRange(startDate, endDate, holidaysSet) {
   return count;
 }
 
+// ── 연차차감·부재일 단일 산출 함수 (모든 저장 경로의 SSoT) ──────────────
+// 회사정책(2026-06-30 확정): 휴가/반차는 "근무일만" 차감(토·일·공휴일 제외).
+// 입력경로(모달/import/직접SQL)와 무관하게 항상 이 함수로 산출한다.
+function computeLeaveValues(leaveType, startDate, endDate, holidaysSet) {
+  if (!startDate || !leaveType) return { annualConsumed: 0, absenceDays: 0, workdays: 0, calDays: 0 };
+  const calDays = daysBetween(startDate, endDate);
+  const holidayCount = countHolidaysInRange(startDate, endDate, holidaysSet || new Map());
+  const workdays = Math.max(0, calDays - holidayCount);     // 근무일(토·일·공휴일 제외)
+  const consumesAnnual = leaveType.consumes_annual === "O";
+  const perDay = Number(leaveType.annual_consumption || 0);
+  // 반차(0.5단가)는 하루 신청 전용 → 다일이어도 0.5 고정(오집계 방지)
+  if (consumesAnnual && perDay === 0.5) {
+    return { annualConsumed: 0.5, absenceDays: 0.5, workdays: 1, calDays };
+  }
+  // 보상휴가(음수 단가, id15) 레거시 가드: 음수 차감(잔여 증가) 방지. (서버 함수 v2와 동일)
+  if (consumesAnnual && perDay < 0) {
+    return { annualConsumed: 0, absenceDays: 0, workdays, calDays };
+  }
+  // 연차차감: 단가형(휴가)만 근무일×단가, 경조사 등(X)은 미차감(0)
+  const annualConsumed = consumesAnnual ? perDay * workdays : 0;
+  // 부재일(Phase B, 2026-06-30): 연차차감형=근무일.
+  //   X형은 is_per_day면 근무일×단가(출장·예비군), 아니면 신청기간 무관 고정 총 인정일수(경조사·건강검진 등).
+  const isPerDay = leaveType.is_per_day === true;
+  const absenceDays = consumesAnnual
+    ? workdays
+    : (isPerDay ? Number(leaveType.absence_days || 0) * workdays : Number(leaveType.absence_days || 0));
+  return { annualConsumed, absenceDays, workdays, calDays };
+}
+
 // 출장 자동 보상휴가 적용 대상 직원
 const COMPENSATORY_TARGETS = new Set(["김찬수", "최승표"]);
 
@@ -291,16 +320,19 @@ export default function LeaveView({ viewer } = {}) {
 
   async function reloadAll() {
     setLoading(true);
-    const [t, r, b, cal] = await Promise.all([
+    const [t, r, b, cal, hol] = await Promise.all([
       supabase.from("leave_types").select("*").eq("is_active", true).order("sort_order"),
       supabase.from("leave_requests").select("*").order("start_date", { ascending: false }),  // RLS: 본인/대표만
       supabase.from("annual_leave_balances").select("*").order("author"),
       supabase.from("calendar_events_public").select("*").order("start_date", { ascending: false }),  // 달력용 전원 공유(공개 컬럼만)
+      supabase.from("company_calendar").select("cal_date, holiday_name").eq("is_holiday", true),  // 공휴일 권위 소스(연차 근무일 차감 기준)
     ]);
     if (t.data) setLeaveTypes(t.data);
     if (r.data) setRequests(r.data);
     if (b.data) setBalances(b.data);
     if (cal.data) setCalEvents(cal.data);
+    // 공휴일 = company_calendar(권위). 노동절 등 Google 공휴일 캘린더 누락분 포함. Google fetch는 fallback/표시 보조.
+    if (hol.data) setHolidays(new Map(hol.data.map(h => [h.cal_date, h.holiday_name || "회사휴무"])));
     setLoading(false);
   }
 
@@ -415,7 +447,11 @@ export default function LeaveView({ viewer } = {}) {
           <GoogleCalendarSync requests={requests}
                               onSyncDone={reloadAll}
                               onExternalEvents={setExternalEvents}
-                              onHolidaysFetched={setHolidays} />
+                              onHolidaysFetched={(gmap) =>
+                                // company_calendar(DB)가 권위. DB 공휴일이 이미 로드됐으면 유지하고,
+                                // 비었을 때만(DB fetch 실패 등) Google 공휴일로 fallback.
+                                setHolidays(prev => (prev && prev.size > 0) ? prev : gmap)
+                              } />
           <button onClick={() => openNew(new Date())}
                   className="px-4 py-2 text-sm font-semibold rounded-md flex items-center gap-1.5 shadow-md hover:shadow-lg transition"
                   style={{ background: THEME.navy, color: "#fff" }}>
@@ -1474,14 +1510,12 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
   );
   const showCompensatoryNotice =
     isTrip && COMPENSATORY_TARGETS.has((author || "").trim()) && holidayInRange > 0;
-  const annualConsumed = useMemo(
-    () => (selectedType?.annual_consumption || 0) * days,
-    [selectedType, days]
+  const leaveVals = useMemo(
+    () => computeLeaveValues(selectedType, startDate, endDate, holidays),
+    [selectedType, startDate, endDate, holidays]
   );
-  const absenceDays = useMemo(
-    () => (selectedType?.absence_days || 1) * days,
-    [selectedType, days]
-  );
+  const annualConsumed = leaveVals.annualConsumed;
+  const absenceDays = leaveVals.absenceDays;
 
   // 신규 등록 시 "휴가·출장 신청" vs "일반 일정" 선택 (양방향 변환의 신규 진입점)
   const [createAsGeneral, setCreateAsGeneral] = useState(false);
@@ -1543,8 +1577,9 @@ function LeaveRequestModal({ init, leaveTypes, authors, holidays, onClose, onSav
       is_all_day: isAllDay,
       start_time: isAllDay ? null : `${startTime}:00`,
       end_time: isAllDay ? null : `${endTime}:00`,
-      total_absence_days: absenceDays,
-      annual_consumed: annualConsumed,
+      // 연차차감·부재일(annual_consumed·total_absence_days)은 DB 트리거 set_leave_request_amounts가
+      // 권위로 산출한다. 클라이언트는 값을 전송하지 않는다(상태-only UPDATE가 DB 권위를 우회하지 않도록).
+      // UI의 computeLeaveValues는 신청 모달 프리뷰 표시 전용. ※ 배포 순서: 마이그레이션(트리거) 먼저 → 클라이언트.
       status,
       approver: approver || null,
       destination: isTrip ? (destination || null) : null,
