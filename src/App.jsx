@@ -273,6 +273,8 @@ function MiniCalendar() {
   );
 }
 
+const STAFF_AUTHORS = ["여은민", "김찬수", "최승표"];
+
 function EntryEditor({ entry, isCurrent, isNew, isExpanded, onToggle, onSave, onDelete, onCancel, onNotice }) {
   const [localData, setLocalData] = useState({
     author: entry.author || "",
@@ -283,12 +285,16 @@ function EntryEditor({ entry, isCurrent, isNew, isExpanded, onToggle, onSave, on
     notes: entry.notes || "",
   });
   const [status, setStatus] = useState("idle");
+  const [manualAuthor, setManualAuthor] = useState(
+    !!(entry.author || "") && !STAFF_AUTHORS.includes(entry.author)
+  );
   const saveTimerRef = useRef(null);
 
-  const doSave = useCallback(async (dataToSave) => {
+  const doSave = useCallback(async (dataToSave, { silent = false } = {}) => {
     const data = dataToSave || localData;
     if (!data.author.trim() || !data.thisWeekTasks.trim()) {
       setStatus("idle");
+      if (!silent) onNotice?.("작성자와 '지난 주 수행' 내용을 입력해야 저장됩니다.", "error");
       return;
     }
 
@@ -302,7 +308,7 @@ function EntryEditor({ entry, isCurrent, isNew, isExpanded, onToggle, onSave, on
 
     if (result?.success) {
       setStatus("saved");
-      onNotice?.("저장되었습니다.", "success");
+      if (!silent) onNotice?.("저장되었습니다.", "success");
       window.setTimeout(() => setStatus("idle"), 1200);
     } else {
       setStatus("editing");
@@ -312,7 +318,7 @@ function EntryEditor({ entry, isCurrent, isNew, isExpanded, onToggle, onSave, on
   const scheduleSave = useCallback((next) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     setStatus("editing");
-    saveTimerRef.current = window.setTimeout(() => doSave(next), 1400);
+    saveTimerRef.current = window.setTimeout(() => doSave(next, { silent: true }), 1400);
   }, [doSave]);
 
   useEffect(() => () => {
@@ -378,10 +384,42 @@ function EntryEditor({ entry, isCurrent, isNew, isExpanded, onToggle, onSave, on
       {isExpanded && (
         <>
           <div className="entry-meta-grid">
-            <label>
+            <div className="entry-field">
               <span>작성자</span>
-              <input value={localData.author} onChange={(e) => handleChange("author", e.target.value)} placeholder="이름" />
-            </label>
+              <div className="author-chips">
+                {STAFF_AUTHORS.map((name) => (
+                  <button
+                    type="button"
+                    key={name}
+                    aria-pressed={!manualAuthor && localData.author === name}
+                    className={`author-chip ${!manualAuthor && localData.author === name ? "selected" : ""}`}
+                    onClick={() => { setManualAuthor(false); handleChange("author", name); }}
+                  >
+                    {name}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  aria-pressed={manualAuthor}
+                  className={`author-chip manual ${manualAuthor ? "selected" : ""}`}
+                  onClick={() => {
+                    setManualAuthor(true);
+                    if (STAFF_AUTHORS.includes(localData.author)) handleChange("author", "");
+                  }}
+                >
+                  + 직접 입력
+                </button>
+              </div>
+              {manualAuthor && (
+                <input
+                  className="author-manual-input"
+                  value={localData.author}
+                  onChange={(e) => handleChange("author", e.target.value)}
+                  placeholder="이름 직접 입력"
+                  autoFocus
+                />
+              )}
+            </div>
             <label>
               <span>이번 주 시작일</span>
               <input type="date" value={localData.thisWeekDate} onChange={(e) => handleChange("thisWeekDate", e.target.value)} />

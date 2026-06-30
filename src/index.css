@@ -627,7 +627,8 @@ button:disabled {
   border-bottom: 1px solid #e5edf5;
 }
 
-.entry-meta-grid label {
+.entry-meta-grid label,
+.entry-meta-grid .entry-field {
   display: grid;
   gap: 5px;
 }
@@ -658,6 +659,44 @@ button:disabled {
 .entry-meta-grid input:disabled {
   background: var(--mg-bg);
   color: var(--mg-sub);
+}
+
+.author-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.author-chip {
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--mg-line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--mg-ink);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.author-chip:hover {
+  border-color: var(--mg-accent);
+  background: #f1f7fb;
+}
+
+.author-chip.manual {
+  border-style: dashed;
+}
+
+.author-chip.selected {
+  background: #1f3a5f;
+  border-color: #1f3a5f;
+  color: #fff;
+}
+
+.entry-meta-grid input.author-manual-input {
+  margin-top: 6px;
 }
 
 .worksheet-grid {
