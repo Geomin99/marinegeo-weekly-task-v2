@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Mic, Upload, FileAudio, Trash2, RotateCcw, ChevronDown, ChevronUp, ShieldAlert, CalendarPlus } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { ErpHero } from "./ErpHero.jsx";
-import { gcalReady, createAllDayEvent } from "./gcal";
+import { gcalReady, gcalCanSilentReconnect, gcalReasonText, createAllDayEvent } from "./gcal";
 import { StaffNoteButton } from "./QuickStaffNote.jsx";
 
 // 업무 통화 로그 (geomin99 전용). 업로드 → 비공개 Storage(voice-calls) → voice_call_logs(pending).
@@ -99,11 +99,13 @@ export default function VoiceLogView({ logs, loading, onReload, onNotice, ownerI
   }
 
   async function addToCalendar(row) {
-    if (!gcalReady()) { onNotice?.("구글 미연동 — 휴가·출장 탭에서 먼저 연동하세요.", "error"); return; }
+    // 토큰이 만료됐어도 과거 동의가 남아 있으면 createAllDayEvent가 조용히 재발급하므로 막지 않는다
+    if (!gcalReady() && !gcalCanSilentReconnect()) { onNotice?.(gcalReasonText("no_grant"), "error"); return; }
     const dues = Array.isArray(row.due_dates) ? row.due_dates.filter((d) => d && d.date) : [];
     if (!dues.length) { onNotice?.("등록할 마감이 없습니다.", "info"); return; }
     setBusy(true);
     let ok = 0;
+    let failReason = null;
     for (const d of dues) {
       const res = await createAllDayEvent({
         summary: `[통화] ${d.label || row.title}`,
@@ -111,9 +113,13 @@ export default function VoiceLogView({ logs, loading, onReload, onNotice, ownerI
         date: d.date,
       });
       if (res.ok) ok++;
+      else if (!failReason) failReason = res.reason;
     }
     setBusy(false);
-    onNotice?.(ok ? `캘린더에 ${ok}건 추가했습니다.` : "캘린더 추가 실패", ok ? "success" : "error");
+    const failed = dues.length - ok;
+    if (ok && !failed) onNotice?.(`캘린더에 ${ok}건 추가했습니다.`, "success");
+    else if (ok) onNotice?.(`캘린더에 ${ok}건 추가, ${failed}건 실패 — ${failReason ? gcalReasonText(failReason) : "원인 미상"}`, "info");
+    else onNotice?.(failReason ? gcalReasonText(failReason) : "캘린더 추가 실패", "error");
   }
 
   const list = (logs || []).filter((r) => !r.deleted_at);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { gcalReady, syncLeaveRequests } from "./gcal";
+import { gcalReady, gcalCanSilentReconnect, gcalReasonText, preloadGcal, ensureGcalReady, syncLeaveRequests } from "./gcal";
 import {
   AlertCircle,
   Archive,
@@ -1285,6 +1285,9 @@ function Workspace({ session }) {
     if (!window.location.hash) window.location.replace(`#${view}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // 이미 구글 연동한 사용자만 인증 스크립트를 미리 받아둔다.
+  // 버튼을 누른 뒤에야 스크립트를 내려받으면 그 사이 user activation이 사라져 팝업이 차단될 수 있다.
+  useEffect(() => { preloadGcal(); }, []);
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -1456,25 +1459,36 @@ function Workspace({ session }) {
     setTriggering(true);
     try {
       let cal = null;
-      if (gcalReady()) {
+      // 클릭 직후, 다른 await 이전에 토큰부터 확보한다.
+      // 네트워크 조회를 먼저 기다리면 브라우저 user activation이 소멸해 구글 인증 창이 차단될 수 있다.
+      let ready = null;
+      if (gcalReady() || gcalCanSilentReconnect()) ready = await ensureGcalReady();
+      if (ready && ready.ok) {
         // 동기화엔 전체 컬럼 필요(서명·event id) → 별도 풀로드
         const { data } = await supabase
           .from("leave_requests")
           .select("*")
           .order("start_date", { ascending: true });
         if (data) cal = await syncLeaveRequests(data);
+      } else if (ready) {
+        cal = { ok: false, reason: ready.reason };
       }
       await Promise.all([fetchEntries(), fetchCenter(), fetchLeave(), fetchInbox()]);
       let msg;
+      let tone = "success";
       if (cal && cal.ok) {
         msg = `동기화 완료 · 캘린더 신규 ${cal.pushed}·갱신 ${cal.updated}` +
               `${cal.removed ? `·삭제 ${cal.removed}` : ""}${cal.errors ? `·실패 ${cal.errors}` : ""} · 데이터 최신화`;
+      } else if (cal && !cal.ok) {
+        // 실패 사유를 뭉뚱그리지 않고 그대로 알린다(미연동·만료·MGEO 없음 구분)
+        msg = `데이터 최신화 완료 · 캘린더 동기화 안 됨 — ${gcalReasonText(cal.reason)}`;
+        tone = "info";   // 캘린더가 실패했는데 성공 토스트로 표시하지 않는다
       } else if (gcalReady()) {
         msg = "동기화 완료 · 데이터 최신화";
       } else {
-        msg = "데이터 최신화 완료 (구글 미연동 — 휴가·출장 탭에서 연동하면 캘린더도 함께 동기화)";
+        msg = "데이터 최신화 완료 (구글 미연동 — 「캘린더」 탭에서 연동하면 캘린더도 함께 동기화)";
       }
-      showNotice(msg, "success");
+      showNotice(msg, tone);
     } catch (e) {
       showNotice(`동기화 중 오류: ${e.message}`, "error");
     } finally {

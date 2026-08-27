@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { ErpHero } from "./ErpHero.jsx";
-import { syncLeaveRequests, needsCalendarSync, updateCalendarEvent, createAllDayEvent, createRawEvent } from "./gcal";
+import { syncLeaveRequests, needsCalendarSync, updateCalendarEvent, createAllDayEvent, createRawEvent, gcalReasonText, loadGis, isRegrantRequired } from "./gcal";
 
 // 흰화면 크래시 방지: 캘린더/모달에서 예외가 나도 앱 전체가 죽지 않게 감싼다.
 class CalErrorBoundary extends Component {
@@ -600,7 +600,6 @@ export default function LeaveView({ viewer } = {}) {
 // Client ID는 공개정보(브라우저 노출 정상). 환경변수에 VITE_ 접두사가 없으면
 // 브라우저 빌드에서 못 읽으므로 fallback 하드코딩으로 동작 보장.
 const GOOGLE_CLIENT_ID_FALLBACK = "897631356111-45ul0ohnrosarqd669d3vlj70gg7kq2i.apps.googleusercontent.com";
-const GIS_SRC = "https://accounts.google.com/gsi/client";
 const CAL_SCOPE = "https://www.googleapis.com/auth/calendar";
 const TOKEN_STORAGE_KEY = "mgeo_gcal_token_v1";
 // 한 번이라도 동의(grant)했는지 표시 — localStorage access token(1h)이 만료돼도
@@ -655,15 +654,16 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents, onHolidays
   const [pulledCount, setPulledCount] = useState(0);
   const tokenClientRef = useRef(null);
 
+  // GIS 로더는 gcal.js 하나로 통합한다. 로더가 둘이면 서로의 <script> 태그를 지워
+  // 한쪽이 영영 준비되지 않는다(연동 버튼 비활성 고착).
   useEffect(() => {
-    if (window.google?.accounts?.oauth2) { setGisReady(true); return; }
-    const existing = document.querySelector(`script[src="${GIS_SRC}"]`);
-    if (existing) { existing.addEventListener("load", () => setGisReady(true)); return; }
-    const s = document.createElement("script");
-    s.src = GIS_SRC; s.async = true; s.defer = true;
-    s.onload = () => setGisReady(true);
-    s.onerror = () => setMsg({ kind: "err", text: "Google Identity Services 로드 실패" });
-    document.head.appendChild(s);
+    let alive = true;
+    loadGis().then((ok) => {
+      if (!alive) return;
+      if (ok) setGisReady(true);
+      else setMsg({ kind: "err", text: "Google Identity Services 로드 실패" });
+    });
+    return () => { alive = false; };
   }, []);
 
   useEffect(() => {
@@ -683,8 +683,9 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents, onHolidays
                 : `OAuth 실패: ${resp.error}`,
             });
           }
-          // silent(prompt:'') 실패 = grant가 만료/철회됨 → 다음 연동 클릭은 consent로 복구
-          clearGranted();
+          // 재동의가 실제로 필요한 오류에서만 grant를 지운다.
+          // 일시적·환경적 오류까지 지우면 다음부터 조용한 재발급이 막힌다(gcal.js와 같은 판정).
+          if (isRegrantRequired(resp.error)) clearGranted();
           setBusy(false); return;
         }
         const newToken = {
@@ -858,6 +859,11 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents, onHolidays
     if (!silent) { setBusy(true); setMsg(null); }
     const r = await syncLeaveRequests(requests);  // 동기화 코어는 gcal.js로 단일화
     if (!silent) setBusy(false);
+    // 준비 실패(미연동·만료·MGEO 없음)를 '완료'로 표시하지 않는다
+    if (!r.ok) {
+      if (!silent) setMsg({ kind: "err", text: gcalReasonText(r.reason) });
+      return;
+    }
     const detail = `신규 ${r.pushed} · 갱신 ${r.updated}${r.removed ? " · 삭제 " + r.removed : ""}${r.errors ? " · 실패 " + r.errors : ""}`;
     if (silent) {
       if (r.pushed || r.updated || r.removed || r.errors)

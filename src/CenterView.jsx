@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   Archive,
@@ -20,7 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
-import { gcalReady, createAllDayEvent, CENTER_EVENT_COLOR_ID } from "./gcal";
+import { gcalReady, gcalCanSilentReconnect, gcalReasonText, createAllDayEvent, updateCalendarEvent, CENTER_EVENT_COLOR_ID } from "./gcal";
 import { ErpHero } from "./ErpHero.jsx";
 import { StaffNoteButton } from "./QuickStaffNote.jsx";
 
@@ -124,6 +124,11 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
   const [completeDate, setCompleteDate] = useState("");
   const [addCal, setAddCal] = useState(false);
   const [completing, setCompleting] = useState(false);
+  // 캘린더 추가 실패 사유 — 모달 안에서 먼저 알리고 완료 처리를 보류한다
+  const [calError, setCalError] = useState(null);
+  // 구글 이벤트는 만들어졌는데 DB 저장이 실패한 경우를 기억한다.
+  // 같은 업무를 다시 시도할 때 이벤트를 또 만들어 중복되는 것을 막는다. { taskId, eventId }
+  const createdEventRef = useRef(null);
 
   const [refreshing, setRefreshing] = useState(false);
   const [scanning, setScanning] = useState(false);
@@ -327,15 +332,24 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
   function openComplete(row) {
+    // 다른 업무로 넘어가면 앞 업무의 미저장 이벤트 기억은 버린다
+    if (createdEventRef.current && createdEventRef.current.taskId !== row.id) createdEventRef.current = null;
     setCompleteTarget(row);
     setCompleteDate(todayYmd());
     setAddCal(false);
     setCompleting(false);
+    setCalError(null);
+  }
+
+  function closeComplete() {
+    setCompleteTarget(null);
+    setCalError(null);
   }
   async function doComplete(withCalendar) {
     const row = completeTarget;
     if (!row) return;
     setCompleting(true);
+    setCalError(null);
     const completedIso = new Date(completeDate + "T00:00:00").toISOString();
     const patch = {
       status: "제출완료",
@@ -346,28 +360,68 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
     let calNote = "";
     // 헌법: 자동 생성 금지 — withCalendar(사용자 명시 동의)일 때만, 그리고 중복 방지
     if (withCalendar && !row.google_calendar_event_id) {
-      const res = await createAllDayEvent({
+      // 앞선 시도에서 이미 만들어 둔 이벤트가 있으면 재사용한다(중복 생성 방지)
+      const pending = createdEventRef.current;
+      let eventId = pending && pending.taskId === row.id ? pending.eventId : null;
+      // 완료일을 바꿔 다시 시도하는 경우, 이미 만든 이벤트의 날짜도 함께 맞춘다.
+      // 그러지 않으면 캘린더 날짜와 DB 완료일이 어긋난 채로 저장된다.
+      if (eventId && pending.date !== completeDate) {
+        const endAt = new Date(completeDate + "T00:00:00");
+        endAt.setDate(endAt.getDate() + 1);            // 구글 종일 이벤트의 end는 exclusive
+        const moved = await updateCalendarEvent(eventId, {
+          start: { date: completeDate },
+          end: { date: `${endAt.getFullYear()}-${String(endAt.getMonth() + 1).padStart(2, "0")}-${String(endAt.getDate()).padStart(2, "0")}` },
+        });
+        if (!moved.ok) {
+          setCompleting(false);
+          setCalError(`이미 만들어진 캘린더 이벤트의 날짜를 ${completeDate}로 바꾸지 못했습니다: ${gcalReasonText(moved.reason)}`);
+          return;
+        }
+        createdEventRef.current = { taskId: row.id, eventId, date: completeDate };
+      }
+      const res = eventId ? { ok: true, eventId } : await createAllDayEvent({
         summary: `[센터완료] ${row.title}`,
         description: `해양벤처진흥센터 업무 완료 기록\n분류: ${row.category}${row.assignee ? ` · 담당: ${row.assignee}` : ""}`,
         date: completeDate,
         colorId: CENTER_EVENT_COLOR_ID,
       });
       if (res.ok) {
-        patch.google_calendar_event_id = res.eventId;
+        eventId = res.eventId;
+        createdEventRef.current = { taskId: row.id, eventId, date: completeDate };
+        patch.google_calendar_event_id = eventId;
         patch.calendar_created_at = new Date().toISOString();
         calNote = " · 캘린더 추가됨";
-      } else if (res.reason === "no_token" || res.reason === "no_calendar") {
-        calNote = " · 캘린더 미연동(휴가·출장 탭에서 구글 연동 먼저)";
       } else {
-        calNote = ` · 캘린더 실패(${res.reason})`;
+        // 캘린더 추가를 원해서 체크했는데 실패한 경우: 완료 처리를 진행하지 않고 모달에서 먼저 알린다.
+        // (캘린더만 조용히 빠진 채 완료되던 종전 동작이 "적용이 안 된다"의 원인이었다)
+        setCompleting(false);
+        setCalError(gcalReasonText(res.reason));
+        return;
       }
+    }
+    // 앞선 시도에서 이미 이벤트를 만들었다면, '캘린더 없이 완료'를 고르더라도 그 id를 함께 저장한다.
+    // 그러지 않으면 구글에만 남고 DB가 모르는 고아 이벤트가 된다.
+    const carried = createdEventRef.current;
+    if (!patch.google_calendar_event_id && carried && carried.taskId === row.id) {
+      patch.google_calendar_event_id = carried.eventId;
+      patch.calendar_created_at = new Date().toISOString();
+      if (!calNote) calNote = " · 캘린더 추가됨";
     }
     const { error } = await supabase.from("center_tasks").update(patch).eq("id", row.id);
     setCompleting(false);
-    setCompleteTarget(null);
-    if (error) { notify(`완료 처리 실패: ${error.message}`, "error"); return; }
-    const failed = calNote.includes("실패") || calNote.includes("미연동");
-    notify(`완료 처리했습니다${calNote}.`, failed ? "info" : "success");
+    if (error) {
+      // DB 저장이 실패하면 모달을 닫지 않는다. 캘린더 이벤트만 남고 완료 상태는 저장되지 않은
+      // 불일치를 사용자에게 알리고, 재시도해도 이벤트가 중복되지 않도록 위에서 기억해 둔다.
+      const orphan = createdEventRef.current && createdEventRef.current.taskId === row.id;
+      setCalError(
+        `완료 저장에 실패했습니다: ${error.message}` +
+        (orphan ? " 구글 캘린더 이벤트는 이미 만들어졌습니다. 다시 시도하면 이벤트를 새로 만들지 않고 저장만 재시도합니다." : ""),
+      );
+      return;
+    }
+    createdEventRef.current = null;
+    closeComplete();
+    notify(`완료 처리했습니다${calNote}.`, "success");
     reload();
   }
 
@@ -655,7 +709,7 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
           <div className="center-complete panel" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
             <div className="center-modal-head">
               <h3><CheckCircle2 size={17} /> 완료 처리</h3>
-              <button className="icon-btn" onClick={() => !completing && setCompleteTarget(null)} aria-label="닫기"><X size={16} /></button>
+              <button className="icon-btn" onClick={() => !completing && closeComplete()} aria-label="닫기"><X size={16} /></button>
             </div>
             <div className="center-complete-body">
               <p className="cc-title">{completeTarget.title}</p>
@@ -668,20 +722,26 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
               ) : (
                 <>
                   <label className="cc-check">
-                    <input type="checkbox" checked={addCal} onChange={(e) => setAddCal(e.target.checked)} />
+                    <input type="checkbox" checked={addCal} onChange={(e) => { setAddCal(e.target.checked); setCalError(null); }} />
                     <span>구글 캘린더(MGEO)에 완료일 추가</span>
                   </label>
-                  {addCal && !gcalReady() && (
-                    <p className="cc-warn">구글 캘린더 미연동 — 「휴가·출장」 탭에서 구글 연동을 먼저 해야 추가됩니다. (연동 안 돼도 완료 처리는 됩니다)</p>
+                  {addCal && !gcalReady() && !gcalCanSilentReconnect() && (
+                    <p className="cc-warn">구글 캘린더 미연동 — 「캘린더」 탭에서 구글 연동을 먼저 해주세요.</p>
+                  )}
+                  {calError && (
+                    <p className="cc-warn">{calError} 완료 처리는 아직 되지 않았습니다.</p>
                   )}
                 </>
               )}
             </div>
             <div className="center-modal-actions">
-              <button className="btn btn-ghost" onClick={() => setCompleteTarget(null)} disabled={completing}>취소</button>
+              <button className="btn btn-ghost" onClick={closeComplete} disabled={completing}>취소</button>
+              {calError && (
+                <button className="btn btn-ghost" onClick={() => doComplete(false)} disabled={completing}>캘린더 없이 완료</button>
+              )}
               <button className="btn btn-primary" onClick={() => doComplete(addCal && !completeTarget.google_calendar_event_id)} disabled={completing}>
                 {completing ? <Loader2 size={15} className="spin" /> : <CheckCircle2 size={15} />}
-                {addCal && !completeTarget.google_calendar_event_id ? " 완료 + 캘린더 추가" : " 완료만 처리"}
+                {calError ? " 다시 시도" : addCal && !completeTarget.google_calendar_event_id ? " 완료 + 캘린더 추가" : " 완료만 처리"}
               </button>
             </div>
           </div>
