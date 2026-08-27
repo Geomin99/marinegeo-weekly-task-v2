@@ -9,6 +9,8 @@ const TOKEN_KEY = "mgeo_gcal_token_v1";
 const CAL_ID_KEY = "mgeo_gcal_calendar_id_v1";
 // 한 번이라도 구글 동의(grant)를 마쳤는지 — LeaveView가 세우는 플래그와 같은 키를 공유한다.
 const GRANT_FLAG_KEY = "mgeo_gcal_granted_v1";
+// 캐시한 캘린더 id가 어느 구글 계정 것인지 — 계정이 바뀌면 이전 계정 캘린더에 쓰는 것을 막는다
+const ACCOUNT_KEY = "mgeo_gcal_account_v1";
 
 // LeaveView와 동일한 OAuth 설정 (Client ID는 공개정보라 브라우저 노출이 정상)
 const GOOGLE_CLIENT_ID_FALLBACK = "897631356111-45ul0ohnrosarqd669d3vlj70gg7kq2i.apps.googleusercontent.com";
@@ -48,6 +50,15 @@ function clearGranted() {
 
 function saveToken(token) {
   try { localStorage.setItem(TOKEN_KEY, JSON.stringify(token)); } catch { /* noop */ }
+}
+
+// 구글이 만료시각 전에 토큰을 무효화(401)한 경우 저장분을 버린다
+function invalidateStoredToken() {
+  try { localStorage.removeItem(TOKEN_KEY); } catch { /* noop */ }
+}
+
+function loadGcalAccount() {
+  try { return localStorage.getItem(ACCOUNT_KEY) || null; } catch { return null; }
 }
 
 // 지금 이 순간 바로 호출 가능한 상태인지(유효 토큰 + 캘린더id 모두 있음)
@@ -180,14 +191,15 @@ let reissueInFlight = null;
 // 유효 토큰 확보(내부용). 실패 사유까지 담아 돌려준다.
 async function acquireToken() {
   const current = loadGcalToken();
-  if (current) return { ok: true, token: current };
+  if (current) return { ok: true, token: current, reissued: false };
   // 동의 이력이 없으면 팝업을 띄우지 않는다 (진입 시 자동 OAuth 금지 — 포테토뭉 권고 2026-06 유지)
   if (!wasGranted()) return { ok: false, reason: "no_grant" };
   if (reissueInFlight) return reissueInFlight;
   reissueInFlight = (async () => {
     const loaded = await loadGis();
     if (!loaded) return { ok: false, reason: "gis_unavailable" };
-    return await requestSilentToken();
+    const r = await requestSilentToken();
+    return r.ok ? { ...r, reissued: true } : r;
   })().finally(() => { reissueInFlight = null; });
   return reissueInFlight;
 }
@@ -201,9 +213,9 @@ export async function ensureGcalToken() {
 let calIdInFlight = null;
 
 // MGEO 캘린더 id 확보: 저장된 값이 있으면 그대로, 없으면 calendarList에서 찾아 캐시한다.
-export async function ensureGcalCalendarId(token) {
+export async function ensureGcalCalendarId(token, { revalidate = false } = {}) {
   const cached = loadGcalCalendarId();
-  if (cached) return cached;
+  if (cached && !revalidate) return cached;
   if (!token) return null;
   if (calIdInFlight) return calIdInFlight;   // 동시 호출이 같은 조회를 중복 수행하지 않도록
   calIdInFlight = (async () => {
@@ -212,13 +224,22 @@ export async function ensureGcalCalendarId(token) {
         headers: { Authorization: `Bearer ${token.access_token}` },
       });
       const data = await r.json();
-      if (data.error) return null;
-      const mgeo = (data.items || []).find((c) => (c.summary || "").toUpperCase() === "MGEO");
-      if (!mgeo) return null;
+      // 재검증 중 조회가 실패하면 기존 값을 유지한다(연결을 끊지 않음)
+      if (data.error) return revalidate ? cached : null;
+      const items = data.items || [];
+      // primary 캘린더 id = 로그인한 구글 계정. 계정이 바뀌었으면 캐시한 캘린더 id를 버린다.
+      const account = (items.find((c) => c.primary) || {}).id || "";
+      const prevAccount = loadGcalAccount();
+      if (account && prevAccount && account !== prevAccount) {
+        try { localStorage.removeItem(CAL_ID_KEY); } catch { /* noop */ }
+      }
+      if (account) { try { localStorage.setItem(ACCOUNT_KEY, account); } catch { /* noop */ } }
+      const mgeo = items.find((c) => (c.summary || "").toUpperCase() === "MGEO");
+      if (!mgeo) { try { localStorage.removeItem(CAL_ID_KEY); } catch { /* noop */ } return null; }
       try { localStorage.setItem(CAL_ID_KEY, mgeo.id); } catch { /* noop */ }
       return mgeo.id;
     } catch {
-      return null;
+      return revalidate ? cached : null;
     }
   })().finally(() => { calIdInFlight = null; });
   return calIdInFlight;
@@ -234,9 +255,38 @@ export async function ensureGcalCalendarId(token) {
 export async function ensureGcalReady() {
   const r = await acquireToken();
   if (!r.ok) return { ok: false, reason: r.reason };
-  const calId = await ensureGcalCalendarId(r.token);
+  // 방금 조용히 재발급했다면 그 사이 구글 로그인 계정이 바뀌었을 수 있다.
+  // 이때만 계정을 다시 확인해, 이전 계정의 캘린더에 쓰는 일을 막는다.
+  const calId = await ensureGcalCalendarId(r.token, { revalidate: !!r.reissued });
   if (!calId) return { ok: false, reason: "no_calendar" };
   return { ok: true, token: r.token, calId };
+}
+
+// 캘린더 API 호출 공통 경로.
+// 구글이 만료시각 전에 401을 돌려주는 경우(조기 무효화) 토큰을 버리고 딱 한 번 다시 시도한다.
+function makeAuthedFetch(initialToken, boundCalId) {
+  let tok = initialToken;
+  let reissueSpent = false;   // 재발급은 이 흐름에서 한 번만 — 401이 반복돼도 매번 시도하지 않는다
+  return async (url, init = {}) => {
+    const send = () => fetch(url, {
+      ...init,
+      headers: { Authorization: `Bearer ${tok.access_token}`, ...(init.headers || {}) },
+    });
+    let r = await send();
+    if (r.status !== 401 || reissueSpent) return r;
+    reissueSpent = true;
+    invalidateStoredToken();
+    const again = await acquireToken();
+    if (!again.ok) return r;          // 재발급 못 하면 원래 401을 그대로 돌려준다
+    // 새 토큰이 다른 구글 계정에서 나왔을 수 있다. 그대로 재전송하면 이전 계정의
+    // 캘린더 주소로 쓰게 되므로, 계정을 확인해 캘린더가 달라졌으면 보내지 않는다.
+    if (boundCalId) {
+      const freshCalId = await ensureGcalCalendarId(again.token, { revalidate: true });
+      if (freshCalId !== boundCalId) return r;
+    }
+    tok = again.token;
+    return await send();
+  };
 }
 
 // 실패 사유 → 사람이 읽는 문장 (화면 문구를 한 곳에서 통일)
@@ -245,6 +295,8 @@ export function gcalReasonText(reason) {
   if (reason === "no_token") return "구글 연동이 만료되었습니다. 「캘린더」 탭에서 다시 연동해주세요.";
   if (reason === "popup_blocked") return "구글 인증 창이 열리지 못했습니다. 팝업 차단을 해제하거나 「캘린더」 탭에서 다시 연동해주세요.";
   if (reason === "popup_closed") return "구글 인증 창이 닫혔습니다. 다시 시도해주세요.";
+  if (reason === "event_deleted") return "이 업무의 캘린더 일정이 삭제된 상태입니다. 구글 캘린더 휴지통에서 그 일정을 복원한 뒤 다시 시도하거나, 캘린더 없이 완료해주세요.";
+  if (reason === "event_conflict") return "캘린더 일정 상태를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.";
   if (reason === "timeout") return "구글 응답이 지연되었습니다. 잠시 후 다시 시도하거나 「캘린더」 탭에서 다시 연동해주세요.";
   if (reason === "gis_unavailable") return "구글 인증 스크립트를 불러오지 못했습니다. 네트워크 상태를 확인한 뒤 다시 시도해주세요.";
   if (reason === "no_calendar") return "구글 계정에서 'MGEO' 캘린더를 찾지 못했습니다. 구글 캘린더에 'MGEO' 이름으로 캘린더를 만들어주세요.";
@@ -264,31 +316,77 @@ export const CENTER_EVENT_COLOR_ID = "1";
 
 // MGEO 공유 캘린더에 종일 이벤트 1일 생성. 자동 호출 금지 — 사용자 명시 동의 시에만 호출할 것.
 // colorId 지정 시 이벤트 색 부여(센터 일정 식별용).
-export async function createAllDayEvent({ summary, description, date, colorId }) {
+// 구글 이벤트 ID 규칙 = base32hex(문자 a-v, 숫자 0-9) 5~1024자.
+// 같은 업무에는 항상 같은 ID를 만들어, 새로고침·다중 탭·다른 사용자가 동시에 처리해도
+// 두 번째 생성 요청이 409로 거부되어 이벤트가 중복되지 않게 한다.
+export function centerEventId(taskId) {
+  const digits = String(taskId ?? "").replace(/[^0-9]/g, "");
+  return digits ? `mgcenter${digits}` : null;
+}
+
+// MGEO 공유 캘린더에 종일 이벤트 1일 생성. 자동 호출 금지 — 사용자 명시 동의 시에만 호출할 것.
+// eventId를 주면 그 ID로 생성해 중복을 막는다(이미 있으면 그 이벤트를 재사용).
+export async function createAllDayEvent({ summary, description, date, colorId, eventId }) {
   const ready = await ensureGcalReady();
   if (!ready.ok) return { ok: false, reason: ready.reason };
   const { token, calId } = ready;
-  try {
-    const end = new Date(date + "T00:00:00");
-    end.setDate(end.getDate() + 1); // Google all-day end는 exclusive
-    const body = {
-      summary,
-      description: description || "",
-      start: { date },
-      end: { date: ymd(end) },
-      ...(colorId ? { colorId } : {}),
-    };
-    const r = await fetch(
-      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`,
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      },
-    );
-    const data = await r.json();
+  const authed = makeAuthedFetch(token, calId);
+  const base = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`;
+  const end = new Date(date + "T00:00:00");
+  end.setDate(end.getDate() + 1); // Google all-day end는 exclusive
+  const endYmd = ymd(end);
+  const body = {
+    summary,
+    description: description || "",
+    start: { date },
+    end: { date: endYmd },
+    ...(colorId ? { colorId } : {}),
+  };
+  const insert = async (payload) => {
+    const r = await authed(base, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json().catch(() => ({}));
     if (data.id) return { ok: true, eventId: data.id };
-    return { ok: false, reason: data.error?.message || `status_${r.status}` };
+    return { ok: false, status: r.status, reason: data.error?.message || `status_${r.status}` };
+  };
+  try {
+    const first = await insert(eventId ? { ...body, id: eventId } : body);
+    if (first.ok || !eventId || first.status !== 409) {
+      return first.ok ? first : { ok: false, reason: first.reason };
+    }
+    // 409 = 같은 ID의 이벤트가 이미 있음 → 새로 만들지 않고 그 이벤트를 쓴다.
+    const gr = await authed(`${base}/${encodeURIComponent(eventId)}`);
+    const ev = await gr.json().catch(() => ({}));
+    // 조회가 실패한 것(429·500·네트워크 등)을 '삭제됨'과 혼동하면 안 된다.
+    // 혼동해서 새로 만들면, 멀쩡히 살아 있는 이벤트가 있는데 중복이 생긴다.
+    // 조회 실패는 실패로 돌려주고 사용자가 다시 시도하게 한다.
+    if (!gr.ok) {
+      if (gr.status === 404) return { ok: false, reason: "event_conflict" };
+      return { ok: false, reason: ev.error?.message || `status_${gr.status}` };
+    }
+    if (ev.status === "cancelled") {
+      // 삭제된 이벤트의 ID는 재사용이 막힌다. 여기서 무작위 ID로 만들면 그때부터
+      // 같은 업무에 대한 ID가 매번 달라져 중복 방지가 무너진다 → 만들지 않고 알린다.
+      return { ok: false, reason: "event_deleted" };
+    }
+    if (!ev.id) return { ok: false, reason: "event_conflict" };
+    // 완료일이 달라졌으면 기존 이벤트 날짜를 맞춘다. 이 PATCH가 실패했는데 성공으로 보고하면
+    // DB 완료일과 캘린더 날짜가 어긋난 채 저장된다 → 응답을 반드시 확인한다.
+    if (ev.start?.date !== date) {
+      const pr = await authed(`${base}/${encodeURIComponent(eventId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ start: { date }, end: { date: endYmd } }),
+      });
+      if (!pr.ok) {
+        const pd = await pr.json().catch(() => ({}));
+        return { ok: false, reason: pd.error?.message || `status_${pr.status}` };
+      }
+    }
+    return { ok: true, eventId, existed: true };
   } catch (e) {
     return { ok: false, reason: e.message };
   }
@@ -299,10 +397,11 @@ export async function createRawEvent(body) {
   const ready = await ensureGcalReady();
   if (!ready.ok) return { ok: false, reason: ready.reason };
   const { token, calId } = ready;
+  const authed = makeAuthedFetch(token, calId);
   try {
-    const r = await fetch(
+    const r = await authed(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`,
-      { method: "POST", headers: { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
     );
     const d = await r.json().catch(() => ({}));
     if (d.id) return { ok: true, eventId: d.id };
@@ -317,10 +416,11 @@ export async function updateCalendarEvent(eventId, body) {
   const ready = await ensureGcalReady();
   if (!ready.ok) return { ok: false, reason: ready.reason };
   const { token, calId } = ready;
+  const authed = makeAuthedFetch(token, calId);
   try {
-    const r = await fetch(
+    const r = await authed(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(eventId)}`,
-      { method: "PATCH", headers: { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
     );
     if (r.ok) return { ok: true };
     const d = await r.json().catch(() => ({}));
@@ -364,7 +464,8 @@ export async function syncLeaveRequests(requests) {
   const { token, calId } = ready;
   let pushed = 0, updated = 0, removed = 0, errors = 0;
   const calUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`;
-  const authHeaders = { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json" };
+  const authed = makeAuthedFetch(token, calId);          // 401(조기 무효화) 시 1회 재발급·재시도
+  const authHeaders = { "Content-Type": "application/json" };
   const markSynced = async (id, sig, extra = {}) => {
     // 구글은 성공했는데 서명 기록이 실패하면 다음 동기화에서 같은 건을 또 처리(루프/중복) 위험 → 최소한 경고로 노출
     const { error } = await supabase.from("leave_requests")
@@ -381,7 +482,7 @@ export async function syncLeaveRequests(requests) {
       // 취소·반려 → 이벤트 삭제 (404/410은 이미 삭제로 보고 성공 처리)
       if (!active) {
         if (!req.google_calendar_event_id) continue;
-        const r = await fetch(`${calUrl}/${req.google_calendar_event_id}`, { method: "DELETE", headers: authHeaders });
+        const r = await authed(`${calUrl}/${req.google_calendar_event_id}`, { method: "DELETE", headers: authHeaders });
         if (r.ok || r.status === 404 || r.status === 410) { await markSynced(req.id, sig, { google_calendar_event_id: null }); removed++; }
         else errors++;
         continue;
@@ -407,15 +508,15 @@ export async function syncLeaveRequests(requests) {
         event = { summary, description, start: { date: startDate }, end: { date: ymd(endDt) } };
       }
       if (req.google_calendar_event_id) {
-        const r = await fetch(`${calUrl}/${req.google_calendar_event_id}`, { method: "PATCH", headers: authHeaders, body: JSON.stringify(event) });
+        const r = await authed(`${calUrl}/${req.google_calendar_event_id}`, { method: "PATCH", headers: authHeaders, body: JSON.stringify(event) });
         if (r.ok) { await markSynced(req.id, sig); updated++; }
         else if (r.status === 404 || r.status === 410) { // 캘린더에서 사라짐 → 재생성(self-heal)
-          const r2 = await fetch(calUrl, { method: "POST", headers: authHeaders, body: JSON.stringify(event) });
+          const r2 = await authed(calUrl, { method: "POST", headers: authHeaders, body: JSON.stringify(event) });
           const d2 = await r2.json();
           if (d2.id) { await markSynced(req.id, sig, { google_calendar_event_id: d2.id }); pushed++; } else errors++;
         } else errors++;
       } else {
-        const r = await fetch(calUrl, { method: "POST", headers: authHeaders, body: JSON.stringify(event) });
+        const r = await authed(calUrl, { method: "POST", headers: authHeaders, body: JSON.stringify(event) });
         const data = await r.json();
         if (data.id) { await markSynced(req.id, sig, { google_calendar_event_id: data.id }); pushed++; } else errors++;
       }

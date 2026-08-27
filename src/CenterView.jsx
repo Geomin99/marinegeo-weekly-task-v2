@@ -20,7 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
-import { gcalReady, gcalCanSilentReconnect, gcalReasonText, createAllDayEvent, updateCalendarEvent, CENTER_EVENT_COLOR_ID } from "./gcal";
+import { gcalReady, gcalCanSilentReconnect, gcalReasonText, createAllDayEvent, centerEventId, CENTER_EVENT_COLOR_ID } from "./gcal";
 import { ErpHero } from "./ErpHero.jsx";
 import { StaffNoteButton } from "./QuickStaffNote.jsx";
 
@@ -127,7 +127,8 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
   // 캘린더 추가 실패 사유 — 모달 안에서 먼저 알리고 완료 처리를 보류한다
   const [calError, setCalError] = useState(null);
   // 구글 이벤트는 만들어졌는데 DB 저장이 실패한 경우를 기억한다.
-  // 같은 업무를 다시 시도할 때 이벤트를 또 만들어 중복되는 것을 막는다. { taskId, eventId }
+  // 중복 생성은 결정적 event ID가 막고, 이 값은 '캘린더 없이 완료'를 골랐을 때
+  // 이미 만든 이벤트를 DB에 연결해 고아로 남지 않게 하는 데 쓴다. { taskId }
   const createdEventRef = useRef(null);
 
   const [refreshing, setRefreshing] = useState(false);
@@ -360,37 +361,21 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
     let calNote = "";
     // 헌법: 자동 생성 금지 — withCalendar(사용자 명시 동의)일 때만, 그리고 중복 방지
     if (withCalendar && !row.google_calendar_event_id) {
-      // 앞선 시도에서 이미 만들어 둔 이벤트가 있으면 재사용한다(중복 생성 방지)
-      const pending = createdEventRef.current;
-      let eventId = pending && pending.taskId === row.id ? pending.eventId : null;
-      // 완료일을 바꿔 다시 시도하는 경우, 이미 만든 이벤트의 날짜도 함께 맞춘다.
-      // 그러지 않으면 캘린더 날짜와 DB 완료일이 어긋난 채로 저장된다.
-      if (eventId && pending.date !== completeDate) {
-        const endAt = new Date(completeDate + "T00:00:00");
-        endAt.setDate(endAt.getDate() + 1);            // 구글 종일 이벤트의 end는 exclusive
-        const moved = await updateCalendarEvent(eventId, {
-          start: { date: completeDate },
-          end: { date: `${endAt.getFullYear()}-${String(endAt.getMonth() + 1).padStart(2, "0")}-${String(endAt.getDate()).padStart(2, "0")}` },
-        });
-        if (!moved.ok) {
-          setCompleting(false);
-          setCalError(`이미 만들어진 캘린더 이벤트의 날짜를 ${completeDate}로 바꾸지 못했습니다: ${gcalReasonText(moved.reason)}`);
-          return;
-        }
-        createdEventRef.current = { taskId: row.id, eventId, date: completeDate };
-      }
-      const res = eventId ? { ok: true, eventId } : await createAllDayEvent({
+      // 업무 id에서 만든 결정적 event ID를 쓴다. 새로고침·다른 탭·다른 사용자가 동시에
+      // 처리해도 두 번째 생성은 409로 거부되고 기존 이벤트를 재사용하므로 중복이 없다.
+      // 완료일이 달라진 경우 기존 이벤트 날짜도 gcal.js가 맞춰 준다.
+      const res = await createAllDayEvent({
         summary: `[센터완료] ${row.title}`,
         description: `해양벤처진흥센터 업무 완료 기록\n분류: ${row.category}${row.assignee ? ` · 담당: ${row.assignee}` : ""}`,
         date: completeDate,
         colorId: CENTER_EVENT_COLOR_ID,
+        eventId: centerEventId(row.id),
       });
       if (res.ok) {
-        eventId = res.eventId;
-        createdEventRef.current = { taskId: row.id, eventId, date: completeDate };
-        patch.google_calendar_event_id = eventId;
+        createdEventRef.current = { taskId: row.id };
+        patch.google_calendar_event_id = res.eventId;
         patch.calendar_created_at = new Date().toISOString();
-        calNote = " · 캘린더 추가됨";
+        calNote = res.existed ? " · 캘린더 일정 확인됨" : " · 캘린더 추가됨";
       } else {
         // 캘린더 추가를 원해서 체크했는데 실패한 경우: 완료 처리를 진행하지 않고 모달에서 먼저 알린다.
         // (캘린더만 조용히 빠진 채 완료되던 종전 동작이 "적용이 안 된다"의 원인이었다)
@@ -403,7 +388,7 @@ export default function CenterView({ tasks = [], loading = false, onReload, onNo
     // 그러지 않으면 구글에만 남고 DB가 모르는 고아 이벤트가 된다.
     const carried = createdEventRef.current;
     if (!patch.google_calendar_event_id && carried && carried.taskId === row.id) {
-      patch.google_calendar_event_id = carried.eventId;
+      patch.google_calendar_event_id = centerEventId(row.id);
       patch.calendar_created_at = new Date().toISOString();
       if (!calNote) calNote = " · 캘린더 추가됨";
     }

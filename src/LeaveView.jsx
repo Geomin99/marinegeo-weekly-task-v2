@@ -722,6 +722,10 @@ function GoogleCalendarSync({ requests, onSyncDone, onExternalEvents, onHolidays
         });
         const data = await r.json();
         if (data.error) throw new Error(data.error.message);
+        // 계정 바인딩: gcal.js와 같은 키에 현재 로그인 계정을 기록해 둔다.
+        // 여기서 안 남기면 다음 재발급 때 '계정이 바뀌었는지'를 판단할 기준이 없다.
+        const primary = (data.items || []).find(c => c.primary);
+        if (primary?.id) { try { localStorage.setItem("mgeo_gcal_account_v1", primary.id); } catch { /* noop */ } }
         const mgeo = (data.items || []).find(c => (c.summary || "").toUpperCase() === "MGEO");
         if (!mgeo) {
           setMsg({ kind: "err", text: "'MGEO' 캘린더를 찾지 못함. 구글 캘린더에 'MGEO' 이름으로 캘린더를 만들어주세요." });
